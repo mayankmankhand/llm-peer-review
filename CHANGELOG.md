@@ -4,6 +4,26 @@
 
 ## Unreleased
 
+<!-- At release: re-record the prompt-load baseline (commands/review.md grew 21 words with the approved edit). The review path changed, so the catch-rate line asks for two Pocket runs on the new path, or the override with its written reason. -->
+
+### Fixed
+
+- **Reviews: reading a plan's must-check list no longer stops for your approval (#302).** In default permission mode, every review that checks a plan stopped to ask before reading the plan's must-check list, because the read was a quoted text-search command. The review now reads the list through the toolkit's startup script (`session-init.js --must-check`), which your permission rows already allow, and gets the same lines: compared on 131 plans, every one matched.
+- **Reviews: a fix to a file git ignores now gets its separate check (#302).** When a finding's fix belonged in a file git does not track, such as a plan, the separate check of the fix saw no change and refused, so the review asked whether to accept the fix on its own check. That check now reads such a file whole when a finding cites it and it changed after the review started. A cited file outside your project, a link, a binary, the review's own output folder and the files the push tripwire never lets out (`.env`, `.env.local`, `.claude/settings.local.json` and the like) are never shown to it; each is listed with the reason.
+- **Maintainer only: a new lesson no longer turns `npm test` red (#301).** An everyday test compared the starter lesson list with `LESSONS.md`, so the next full run after every new lesson failed, often on a branch that touched neither file. The release check now makes that comparison on release runs only, as a `lesson list` line that names the missing leads and the command that rebuilds the list (`node scripts/seed-history.js`, release step 1). Everyday runs print an `info lesson list` line and never fail on it.
+- **Maintainer only: the release check's own tests pass under the catch-rate override (#302).** A release run with `TK_RELEASE_CATCH_OVERRIDE` set passed the setting on to the gate's own test suite, where the five cases that expect the catch-rate check to fail saw it pass, so the gate failed its own suite. The suite now starts every gate it runs without the caller's `TK_RELEASE_` settings.
+
+### Upgrading
+
+- Everything arrives with the plugin update, with no setup step and no new permission rows: the review's new call runs a script your existing rows already allow.
+- A copy-install for other editors gets the changed review command and scripts when you re-run `setup.sh` or `setup.ps1`.
+
+### Why
+
+v8.0.19's notes named two toolkit steps that still asked in its default-mode practice run: the review's read of the must-check list, and a fix to the plan file that could not reach the separate check. A practice session on this build ran the old read and the new one side by side: the old read stopped for approval and the new one ran. A replay of the v8.0.19 case through the real separate checker read a real fix as fixed and an edit that left the problem as not fixed, and refused the untouched file.
+
+Maintainer only: the starter lesson list reaches no project before a release, and release step 1 rebuilds it, so checking it on every test run only turned runs red between releases. The lessons log recorded three such red runs before this change.
+
 <!-- At release: re-record the prompt-load baseline (commands/execute.md grew 465 words and skills/loop-rules/SKILL.md 168 with the approved edits, the review's four included). -->
 
 **A skipped check before a plan step's work is now caught at that step, while the work is not yet committed, and `/tk:execute` repairs it there by itself (#290).** Before, nothing noticed until the hand-off to `/tk:review` at the end of the build, when the step was already committed and could never be proved.

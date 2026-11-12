@@ -396,7 +396,6 @@
 
 - **Never share a standing page that closes findings by file between branches.**
 - **Run a reviewer's suggested fix in a scratch case before applying it.**
-- **After adding a lesson lead, rebuild `seed/toolkit-lesson-leads.txt` with `scripts/seed-history.js`.**
 
 ## Issue 241 (check a claim at its source)
 
@@ -551,6 +550,10 @@
 - **Once you read a held-out set's misses to fix against them, it is no longer held out: the first score is the measure.**
 - **An exclusion list of bare words also drops true matches that use them; exclude the nearby problem's own phrases.**
 - **A guard that reads a file its own step creates has no before state: aim it at a file that exists, or make it a target.**
+
+## Issues 301 and 302 (release gaps)
+
+- **In a numbered step, put an explanation after the step's last action, never between two actions.**
 
 ## Issue 290 (catch a skipped before check at its step)
 

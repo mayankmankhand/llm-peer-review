@@ -131,6 +131,19 @@
 //                    the harness, and under --tests-only (the ledger is
 //                    gitignored, so CI and fresh clones never see it; the
 //                    info line below still prints there).
+//   8. Lesson list - the checked commit's seed/toolkit-lesson-leads.txt (the
+//                    starter lesson list plugin/ ships for the upgrade audit)
+//                    must carry every bold lead of that commit's LESSONS.md
+//                    (issue #301). The list reaches no project before a
+//                    release and release step 1 rebuilds it, so it is checked
+//                    here and not in the everyday tests, where every new
+//                    lesson turned the next full run red. A miss fails,
+//                    naming the leads and node scripts/seed-history.js. Only
+//                    the commit a pushed ref points at is read, never the
+//                    commits between, so lessons land between releases without
+//                    a rebuild. No line for a commit without the list; under
+//                    --tests-only an `info lesson list` line on the working
+//                    tree instead, never counted.
 //
 // After check 2 it also prints one `info prompt load` line: how many words each
 // prompt file loads against scripts/prompt-load-baseline.json (issue #206). It is
@@ -155,7 +168,9 @@
 // R only. Checks T, 3, 4, 5 and 6 judge a release (a bumped version, a marketplace
 // pin, a tag), which a commit in the middle of a cycle does not have yet and a
 // CI checkout, fetched without tags, cannot show. They are skipped with one
-// line saying so. The suites still go through the same exit-code-only runner.
+// line saying so; checks 7 and 8 judge a release too, and under this flag the
+// catch rate and the lesson list print info lines instead. The suites still go
+// through the same exit-code-only runner.
 // It cannot be combined with --commit, --pushing-tag or --remote: those only
 // feed the skipped checks, so together they are a usage error, never a quiet
 // way to push without the release checks. `npm run test:release` is the full
@@ -999,7 +1014,73 @@ function earlierBaseline(sha, prevTag, newHash, qc) {
   return null;
 }
 
-// Checks T, 3, 4, 5, 6 and 7. Every commit named by --commit or --pushing-tag is
+// --- 8. lesson list (issue #301) -------------------------------------------------------
+// The starter lesson list (seed/toolkit-lesson-leads.txt: every bold lead the
+// toolkit's own LESSONS.md has carried) ships in plugin/ for the upgrade audit's
+// copied-lesson check. It reaches no project before a release, and release step 1
+// rebuilds it with scripts/seed-history.js, so it is checked here, on release
+// runs. It used to be an everyday test, which failed the next full run after
+// every new lesson, often on a branch that touched neither file. Each checked
+// commit's own LESSONS.md and list are read with git show: the commit a pushed
+// ref points at, never the commits between, so a lesson can land between
+// releases without a rebuild. A commit without the list (any project but this
+// toolkit) gets no line.
+const LESSON_LIST = 'seed/toolkit-lesson-leads.txt';
+// The leads are read with the upgrade audit's own readers, required from beside
+// this script (one definition, as scripts/test-seed-history.js reads them), not
+// from --repo, which in the tests is a scratch repo without them. Loaded on
+// first use, so a run that never reaches the check does not pay for it.
+function lessonReaders() {
+  return require(path.join(__dirname, '..', '.claude', 'scripts', 'upgrade-audit.js'));
+}
+// The leads of a LESSONS.md text that a list text does not carry, as the index
+// spells them. A list line is a lead unless it is blank or a # comment.
+function missingLeads(sb, lessonsText, listText) {
+  const listed = new Set(listText.split(/\r?\n/).filter(l => l.trim() && !l.startsWith('#')).map(l => sb.leadKey(l)));
+  return sb.lessonBullets(sb.normalizeLines(lessonsText)).filter(b => b.lead && !listed.has(sb.leadKey(b.lead))).map(b => b.lead);
+}
+// "2 leads (A | B)", at most five leads named, so the line stays one line.
+function leadCount(leads) {
+  const named = leads.slice(0, 5).join(' | ') + (leads.length > 5 ? ' | and ' + (leads.length - 5) + ' more' : '');
+  return leads.length + (leads.length === 1 ? ' lead' : ' leads') + ' (' + named + ')';
+}
+function checkLessonList(target) {
+  const name = 'lesson list';
+  const at = target.label + ': ';
+  const list = git(['show', target.sha + ':' + LESSON_LIST]);
+  if (list.status !== 0) return;
+  const lessons = git(['show', target.sha + ':LESSONS.md']);
+  let missing;
+  try {
+    missing = missingLeads(lessonReaders(), lessons.status === 0 ? lessons.out : '', list.out);
+  } catch (e) { report(name, false, at + 'the lesson readers could not be loaded (' + e.message + ')'); return; }
+  if (missing.length) report(name, false, at + leadCount(missing) + ' of LESSONS.md not in ' + LESSON_LIST + '; run node scripts/seed-history.js (release step 1) and commit the rebuilt list');
+  else report(name, true, at + 'every lead of LESSONS.md is in ' + LESSON_LIST);
+}
+
+// --- info: lesson list (issue #301) ----------------------------------------------------
+// Not a check: never counted, never fails. Under --tests-only (npm test, CI) it
+// says whether the working tree's starter lesson list carries every lead of
+// LESSONS.md, so a list that is behind shows in every everyday run without
+// turning it red; check 8 on a release run is the one that blocks. Silent when
+// the repository has no list.
+function infoLessonList() {
+  const listFile = path.join(REPO, LESSON_LIST);
+  if (!fs.existsSync(listFile)) return;
+  let missing;
+  try {
+    const lessonsFile = path.join(REPO, 'LESSONS.md');
+    const lessonsText = fs.existsSync(lessonsFile) ? fs.readFileSync(lessonsFile, 'utf8') : '';
+    missing = missingLeads(lessonReaders(), lessonsText, fs.readFileSync(listFile, 'utf8'));
+  } catch (e) {
+    console.log('  info lesson list - unavailable: ' + e.message);
+    return;
+  }
+  if (!missing.length) console.log('  info lesson list - every lead of LESSONS.md is in ' + LESSON_LIST);
+  else console.log('  info lesson list - ' + leadCount(missing) + ' of LESSONS.md not in ' + LESSON_LIST + ' yet; release step 1 rebuilds it (node scripts/seed-history.js), and a release run fails until then');
+}
+
+// Checks T, 3, 4, 5, 6, 7 and 8. Every commit named by --commit or --pushing-tag is
 // checked once, labelled with how it was named; with neither, HEAD.
 function checkCommits() {
   const targets = [];
@@ -1036,6 +1117,7 @@ function checkCommits() {
     checkReleaseTag(t, pushedTags);
     checkLandings(t);
     checkCatchRate(t);
+    checkLessonList(t);
   }
 }
 
@@ -1047,8 +1129,10 @@ function checkCommits() {
   checkPromptCeiling();
   infoPromptLoad();
   infoCatchRate();
-  if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref, release tag and landings judge a release, not an everyday test run; run without the flag for the full gate');
-  else checkCommits();
+  if (opts.testsOnly) {
+    infoLessonList();
+    report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref, release tag and landings judge a release, not an everyday test run; run without the flag for the full gate');
+  } else checkCommits();
   const failedCount = results.filter(ok => !ok).length;
   console.log('release-check: ' + (results.length - failedCount) + ' passed, ' + failedCount + ' failed');
   process.exit(failedCount ? 1 : 0);
