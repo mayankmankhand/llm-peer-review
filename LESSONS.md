@@ -420,7 +420,7 @@
 - **Probe why a command prompts before choosing the fix.**
 - **Give every check Claude reads a printed answer, never a bare exit code.**
 - **Reproduce a CI-only flake before fixing it, in a throwaway branch's matrix, then again with the fix.**
-- **Keep each failure detail on one line, so the case names a check looks for stay in the release gate's tail.**
+- **Aim a check at a suite's FAIL line: the release check always shows it, but may cut the list at the end.**
 
 ## Issue 222 (the shadow M9 gate)
 
