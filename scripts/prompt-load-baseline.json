@@ -30,7 +30,7 @@
     "commands/pair-debug.md": 938,
     "commands/peer-review.md": 2150,
     "commands/review.md": 8996,
-    "commands/worktree.md": 1094,
+    "commands/worktree.md": 1203,
     "session": 2996,
     "skills/audit-html/SKILL.md": 3572,
     "skills/cloud/SKILL.md": 1506,
@@ -63,7 +63,7 @@
     "skills/review-ux/SKILL.md": 3129,
     "skills/security-audit/SKILL.md": 3830,
     "skills/setup/SKILL.md": 1443,
-    "skills/upgrade/SKILL.md": 6015,
+    "skills/upgrade/SKILL.md": 6244,
     "skills/writing/SKILL.md": 828
   }
 }
