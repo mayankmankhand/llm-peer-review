@@ -70,20 +70,22 @@ Why: a pasted manual sits in the parent transcript once per dispatch and is the 
 
 ### C-4: Every agent declares an output contract
 - **Since:** 7.0.0
+- **Runs:** once
 - **Scope:** agents
 - **Detector:** manual
 - **Looks behind:** `an agent body that never says what it returns: no fixed shape (JSONL lines, "one line per ID", "Score: N/10"), no literal for the empty case, nothing a dispatcher could parse or count`
 - **Fix:** end the agent with the exact return shape and the literal for "nothing found", so malformed output is visible and a re-dispatch is bounded
 
-Why: the routing guardrails depend on it. A worker with a checkable return can be re-dispatched once on malformed output and its findings can be audited; one that returns free prose fails silently.
+Why: the routing guardrails depend on it. A worker with a checkable return can be re-dispatched once on malformed output and its findings can be audited; one that returns free prose fails silently. It runs once per project (#305): a project that began before 7.0.0 had it on the upgrade that brought it, and one that began on 7.0.0 or later gets it on its next upgrade. It is a judgment read, so a finding the owner declines does not come back on every upgrade.
 
 ### C-5: Finders and judges carry no edit tools
 - **Since:** 7.0.0
+- **Runs:** every upgrade
 - **Scope:** agents
 - **Detector:** agent-tools
 - **Fix:** declare `tools: Read, Grep, Glob` (Bash only for read-only checks the job needs); a finder or judge never edits
 
-Why: a finder that could edit would apply changes before the M2 audit judged them, and a judge that could edit would be a fixer, which M3 forbids. The detector reads every project-owned agent whose name or description says finder, reviewer, critic, skeptic, verifier, judge, or auditor, and flags one with no `tools:` line (every tool, by default) or with Edit, Write, or NotebookEdit in it.
+Why: a finder that could edit would apply changes before the M2 audit judged them, and a judge that could edit would be a fixer, which M3 forbids. The detector reads every project-owned agent whose name or description says finder, reviewer, critic, skeptic, verifier, judge, or auditor, and flags one with no `tools:` line (every tool, by default) or with Edit, Write, or NotebookEdit in it. A project can add such an agent on any day, and the check is exact and cheap, so this entry runs on every upgrade (#305); tied to its version alone, it never reached a project that began after 7.0.0.
 
 ### C-6: Toolkit scripts are upstream-only
 - **Since:** 7.0.0
@@ -144,7 +146,7 @@ Why: under the plugin every toolkit command, skill, and agent is registered as `
 - **Detector:** review-kinds
 - **Fix:** add the agent under `.claude/agents/` with an output contract and a read-only tools list, give the row its three cells (`What changed`, `Specialist`, `subagent_type=<name>`), or remove the row
 
-Why: `.claude/toolkit/review-kinds.md` is how a project adds review kinds of its own: `/tk:review` appends its rows to the detection table and dispatches the agent each row names, with the same per-run prompt and through the same M2 audit as a toolkit finder. A row the review cannot use fails quietly, as a kind that never runs, so the detector reads the file when it is there and reports each row that has other than three cells, names no `subagent_type`, names a `tk:` agent (the toolkit's kinds are already in the table), or names an agent no file under `.claude/agents/` defines, by file name or by its frontmatter `name`. It also reports a named agent that carries Edit, Write or NotebookEdit, or declares no tools list, unless C-5 is in this run's range and already covers that agent by its role, so one agent is never reported twice and never missed (C-5 ranges from 7.0.0, so on a later upgrade it would not see an agent added since); the agent's output contract stays C-4's to judge. The header row and the rule line under it are never rows, and an escaped bar inside a cell does not split it. A project with no such file has no finding, and the folder itself is outside every other convention's scope: it holds the project's own text, not toolkit references. The file can change on any day, so this entry runs on every upgrade.
+Why: `.claude/toolkit/review-kinds.md` is how a project adds review kinds of its own: `/tk:review` appends its rows to the detection table and dispatches the agent each row names, with the same per-run prompt and through the same M2 audit as a toolkit finder. A row the review cannot use fails quietly, as a kind that never runs, so the detector reads the file when it is there and reports each row that has other than three cells, names no `subagent_type`, names a `tk:` agent (the toolkit's kinds are already in the table), or names an agent no file under `.claude/agents/` defines, by file name or by its frontmatter `name`. It also reports a named agent that carries Edit, Write or NotebookEdit, or declares no tools list, unless C-5 is in this run's range and already covers that agent by its role, so one agent is never reported twice and never missed (C-5 runs on every upgrade from 8.0.21, so it is in range on every run; the condition keeps C-12 reporting such an agent should C-5 ever leave the range); the agent's output contract stays C-4's to judge. The header row and the rule line under it are never rows, and an escaped bar inside a cell does not split it. A project with no such file has no finding, and the folder itself is outside every other convention's scope: it holds the project's own text, not toolkit references. The file can change on any day, so this entry runs on every upgrade.
 
 ### C-13: Instructions newer models no longer need
 - **Since:** 7.5.0
@@ -195,12 +197,13 @@ Why: a step that says check, verify or confirm and names no command leaves the m
 
 ### C-18: The lessons files keep both sides on a merge
 - **Since:** 8.0.0
+- **Runs:** once
 - **Scope:** gitattributes
 - **Detector:** lessons-merge
 - **Severity:** suggest
 - **Fix:** append the lines the finding lists to `.gitattributes` (create the file when it is absent): the comment line, then `LESSONS.md merge=union` and `LESSONS-detail.md merge=union` for each file git does not already merge that way; leave every other line as it is
 
-Why: two branches that each add a lesson both append to `LESSONS.md` and `LESSONS-detail.md`, so every pair of parallel worktrees conflicts there, and a conflict fixed by hand can drop either side's lesson. Git's built-in union driver keeps the lines both sides added instead, and `/tk:merge` then checks the joined file for a lead written twice. `CHANGELOG.md` is left out on purpose: a union merge can file a line under a version already released, with no conflict to show it. The detector asks git (`git check-attr merge`), so a rule anywhere git reads one counts, and reports one finding when a lessons file the project has is not merged with `union`; a project that is not a git repository has none. It ships at `suggest`: a project that fixes these conflicts by hand loses nothing it had. `/tk:setup` writes the lines into a new `.gitattributes`, and a migration from the copy-install appends them to an existing one, so this entry is for projects set up before it: a project set up later on the plugin with a `.gitattributes` of its own, which setup leaves untouched, adds the lines by hand.
+Why: two branches that each add a lesson both append to `LESSONS.md` and `LESSONS-detail.md`, so every pair of parallel worktrees conflicts there, and a conflict fixed by hand can drop either side's lesson. Git's built-in union driver keeps the lines both sides added instead, and `/tk:merge` then checks the joined file for a lead written twice. `CHANGELOG.md` is left out on purpose: a union merge can file a line under a version already released, with no conflict to show it. The detector asks git (`git check-attr merge`), so a rule anywhere git reads one counts, and reports one finding when a lessons file the project has is not merged with `union`; a project that is not a git repository has none. It ships at `suggest`: a project that fixes these conflicts by hand loses nothing it had. `/tk:setup` writes the lines into a new `.gitattributes`, and a migration from the copy-install appends them to an existing one, so this entry is for the projects those miss: one set up before it, and one set up later on the plugin with a `.gitattributes` of its own, which setup leaves untouched. It runs once per project (#305): a project that began before 8.0.0 had it on the upgrade that brought it, one that began on 8.0.0 or later gets it on its next upgrade, and a suggestion the owner declines does not come back.
 
 ### C-19: A pasted project file stays under the paste limit
 - **Since:** 8.0.1

@@ -778,7 +778,9 @@ check('the fixture rows are really in the shipped retired list, and the missing 
 check('the artifacts fixture really carries the old script path', read(path.join(STALE, 'artifacts/README.md')).includes('node .claude/scripts/render-html.js'));
 r = audit(STALE);
 by = (id) => r.findings.filter(f => f.id === id);
-check('the range is 7.0.0 -> 7.1.0 with C-2, C-7, C-9, C-10 and C-11 each in it', /7\.0\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(r.summary), r.summary);
+// C-5 runs on every upgrade, and C-4 runs once, owed by a project that began on
+// 7.0.0 or later (#305).
+check('the range is 7.0.0 -> 7.1.0 with C-2, C-5, C-7, C-9, C-10 and C-11 each in it, and C-4 owed once', /7\.0\.0 -> 7\.1\.0 \[C-2, C-4, C-5, C-7, C-9, C-10, C-11\]; 1 run-once check\(s\) owed \[C-4\]/.test(r.summary), r.summary);
 check('C-7 reports the 7.0.0 rules stamp', by('C-7').length === 1 && /stamped 7\.0\.0/.test(by('C-7')[0].what));
 var c9Missing = by('C-9').find(f => (f.fields || []).some(x => x.label === 'Missing rows'));
 var c9RetiredAll = by('C-9').filter(f => (f.fields || []).some(x => x.label === 'Retired rows'));
@@ -832,7 +834,9 @@ check('#203 zero findings over a REAL range stays quiet about the plugin', !/not
 }
 const CURRENT = path.join(TMP, 'clean-current');
 commonFiles(CURRENT);
-write(CURRENT, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.1.0', path: 'plugin', auditedVersion: '7.1.0' }, null, 2));
+// It has had C-4, the run-once check its range would otherwise owe it (#305):
+// an owed check is work, which keeps the "nothing changed here" line out.
+write(CURRENT, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.1.0', path: 'plugin', auditedVersion: '7.1.0', onceDone: ['C-4'] }, null, 2));
 write(CURRENT, '.claude/rules/toolkit.md', stampRules('7.1.0'));
 write(CURRENT, '.claude/settings.local.json', read(path.join(PLUGIN, 'seed', 'settings.local.json')));
 write(CURRENT, '.gitattributes', read(path.join(PLUGIN, 'seed', 'gitattributes')));
@@ -1602,7 +1606,7 @@ if (OWN('4i')) {
   check('--stamp records both lost-row candidates in the offered-rows record, present or declined, and says so', st.status === 0 && JSON.stringify(recordRowsOf(dir)) === JSON.stringify(keys) && /recorded 2 permission rows of the project's own that C-9 offers back in the offered-rows record/.test(st.stderr), st.stderr + JSON.stringify(recordRowsOf(dir)));
   res = audit(dir);
   // C-9 still runs after the stamp (it runs on every upgrade), so the record alone keeps the row out.
-  const c9InRange = (x) => /7\.1\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(x.summary);
+  const c9InRange = (x) => /7\.1\.0 -> 7\.1\.0 \[C-2, C-5, C-7, C-9, C-10, C-11\]/.test(x.summary);
   check('  after the stamp C-9 still runs, and the declined row is not offered again', res.status === 0 && c9InRange(res) && lostOf(res) === null, res.summary + JSON.stringify(lostOf(res)));
   write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW } }, null, 2) + '\n');
   res = audit(dir);
@@ -1866,7 +1870,7 @@ function audited710(name) {
   return dir;
 }
 // The check the conventions mutation below must break.
-const audited710Ranges = (res) => res.status === 0 && /7\.1\.0 -> 7\.2\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(res.summary) && ['C-9', 'C-10', 'C-11'].every(id => res.findings.some(f => f.id === id));
+const audited710Ranges = (res) => res.status === 0 && /7\.1\.0 -> 7\.2\.0 \[C-2, C-5, C-7, C-9, C-10, C-11\]/.test(res.summary) && ['C-9', 'C-10', 'C-11'].every(id => res.findings.some(f => f.id === id));
 if (OWN('4l')) {
 {
   const b72 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN72, '--version', '7.2.0'], { cwd: REPO, encoding: 'utf8' });
@@ -1876,7 +1880,7 @@ if (OWN('4l')) {
   check('fixture: the old ledger comment ends on the line naming .claude/scripts/pre-push-check.js, and Bash(git config *) is retired', AUDITED_710_GITIGNORE[flaggedLine - 1] === V633_GITIGNORE[53] && RETIRED.includes('Bash(git config *)'), AUDITED_710_GITIGNORE[flaggedLine - 1]);
   const res = audit(dir, [], { pluginRoot: PLUGIN72 });
   const of = (id) => res.findings.filter(f => f.id === id);
-  check('the range is 7.1.0 -> 7.2.0 with C-2, C-7, C-9, C-10 and C-11 in it, and each of C-9, C-10 and C-11 reports', audited710Ranges(res), res.summary);
+  check('the range is 7.1.0 -> 7.2.0 with C-2, C-5, C-7, C-9, C-10 and C-11 in it, and each of C-9, C-10 and C-11 reports', audited710Ranges(res), res.summary);
   check('C-9 reports the missing seed row and the retired Bash(git config *), and asks nothing about acceptEdits again', JSON.stringify(fieldOf(res, 'C-9', 'Missing rows')) === JSON.stringify([MISSING_ROW]) && JSON.stringify(fieldOf(res, 'C-9', 'Retired rows')) === JSON.stringify(['Bash(git config *)']) && JSON.stringify(fieldOf(res, 'C-9', 'Missing ask rows')) === JSON.stringify(SEED_ASK) && !of('C-9').some(f => /defaultMode/.test(f.what)) && of('C-9').length === 3, JSON.stringify(of('C-9').map(f => f.key)));
   check('C-10 reports the ledger comment line naming pre-push-check.js, with the comment lines above it', of('C-10').length === 1 && of('C-10')[0].file.line === flaggedLine && of('C-10')[0].what.includes('names .claude/scripts/pre-push-check.js') && of('C-10')[0].what.includes('Lines ' + (flaggedLine - 4) + ' to ' + (flaggedLine - 1) + ' directly above it'), JSON.stringify(of('C-10')));
   check('C-11 reports /review in the command at Warn and leaves the /ask-gpt lesson in LESSONS.md alone (history, issue #187)', of('C-11').length === 1 && of('C-11').some(f => f.file.relPath === '.claude/commands/myteam-ship.md' && f.severity === 'warn') && !of('C-11').some(f => f.file.relPath === 'LESSONS.md'), JSON.stringify(of('C-11').map(f => [f.file.relPath, f.severity])));
@@ -1889,7 +1893,7 @@ if (OWN('4l')) {
   check('  with every fix applied the rerun has no finding, and every receipt agrees with it', fixed.length === 5 && after.findings.length === 0 && disagree.length === 0, JSON.stringify(after.findings.map(f => f.key)) + ' | ' + disagree.join(' | '));
   const st = spawnSync('node', stampWithRows([SCRIPT, '--project', dir, '--plugin-root', PLUGIN72, '--stamp']), { encoding: 'utf8' });
   const next = audit(dir, [], { pluginRoot: PLUGIN72 });
-  check('  --stamp records 7.2.0, and the next audit keeps C-9, C-10 and C-11 in range with 0 candidates', st.status === 0 && JSON.parse(read(path.join(dir, '.claude', '.toolkit-state.json'))).auditedVersion === '7.2.0' && /7\.2\.0 -> 7\.2\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(next.summary) && next.findings.length === 0, st.stderr + next.summary);
+  check('  --stamp records 7.2.0, and the next audit keeps C-9, C-10 and C-11 in range with 0 candidates', st.status === 0 && JSON.parse(read(path.join(dir, '.claude', '.toolkit-state.json'))).auditedVersion === '7.2.0' && /7\.2\.0 -> 7\.2\.0 \[C-2, C-5, C-7, C-9, C-10, C-11\]/.test(next.summary) && next.findings.length === 0, st.stderr + next.summary);
 }
 }
 if (OWN('4m')) {
@@ -2229,7 +2233,7 @@ var st = spawnSync('node', stampWithRows([SCRIPT, '--project', STAMP, '--plugin-
 var stamped = JSON.parse(read(path.join(STAMP, '.claude', '.toolkit-state.json')));
 check('--stamp raises the audited version and keeps the rest of the state', st.status === 0 && stamped.auditedVersion === '7.1.0' && stamped.version === '7.1.0' && stamped.previousVersion === '6.3.3' && stamped.path === 'copy-migrated' && /stamped/.test(st.stderr), st.stderr);
 r = audit(STAMP);
-check('after the stamp only the conventions that run on every upgrade are in range (C-2, C-7, C-9, C-10, C-11), with nothing to report', /7\.1\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(r.summary) && r.findings.length === 0, r.summary);
+check('after the stamp only the conventions that run on every upgrade are in range (C-2, C-5, C-7, C-9, C-10, C-11), with nothing to report', /7\.1\.0 -> 7\.1\.0 \[C-2, C-5, C-7, C-9, C-10, C-11\]/.test(r.summary) && r.findings.length === 0, r.summary);
 }
 const NEWER = JSON.stringify({ version: '7.2.0', auditedVersion: '7.2.0', path: 'plugin' });
 write(STAMP, '.claude/.toolkit-state.json', NEWER);
@@ -2283,7 +2287,7 @@ if (OWN('7b')) {
   const want = before.replace('<!-- Toolkit version: 7.0.0 |', '<!-- Toolkit version: 7.1.0 |');
   const dir = rulesCase('equal-lf', before);
   const res = audit(dir);
-  check('text equal to the seed with an older stamp: no C-7 finding, with C-7 still in range', res.status === 0 && c7Of(res).length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(res.summary), res.stdout + res.summary);
+  check('text equal to the seed with an older stamp: no C-7 finding, with C-7 still in range', res.status === 0 && c7Of(res).length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-2, (?:C-4, )?C-5, C-7, C-9, C-10, C-11\]/.test(res.summary), res.stdout + res.summary);
   let st1 = stampRun(dir);
   check('--stamp rewrites only the version in the stamp line (every other byte identical) and says so on stderr', st1.status === 0 && want !== before && rulesOf(dir) === want && /restamped \.claude\/rules\/toolkit\.md from 7\.0\.0 to 7\.1\.0/.test(st1.stderr), st1.stderr);
   const st2 = stampRun(dir);
@@ -2355,7 +2359,7 @@ if (OWN('7b')) {
   check('a migrated project whose files match the seed and whose rules stamp alone is behind reports 0 candidates over C-1 to C-11', migratedCleanQuiet(before7), before7.stdout.slice(0, 400) + before7.summary);
   const mst = stampRun(mc);
   const after7 = audit(mc);
-  check('  --stamp records 7.1.0 and restamps the rules file; the next audit runs C-2, C-7, C-9, C-10 and C-11 with 0 candidates', mst.status === 0 && /restamped/.test(mst.stderr) && rulesOf(mc) === stampRules('7.1.0') && after7.status === 0 && after7.findings.length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(after7.summary), mst.stderr + after7.summary);
+  check('  --stamp records 7.1.0 and restamps the rules file; the next audit runs C-2, C-5, C-7, C-9, C-10 and C-11 with 0 candidates', mst.status === 0 && /restamped/.test(mst.stderr) && rulesOf(mc) === stampRules('7.1.0') && after7.status === 0 && after7.findings.length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-2, C-5, C-7, C-9, C-10, C-11\]/.test(after7.summary), mst.stderr + after7.summary);
 }
 }
 if (OWN('7c')) {
@@ -3002,11 +3006,17 @@ console.log('\n9b. project extensions: the rules-file marker (C-7) and review ki
   const edit = one('edit', { [KINDS]: table(GOOD_ROW), '.claude/agents/design-fidelity.md': agent('design-fidelity', 'Read, Edit') }, (f, out) => /is granted Edit/.test(f.what) && /C-4/.test(f.what) && /Edit/.test(out.stdout), 'a row whose agent carries Edit is one finding, and its receipt shows the tools line');
   check('C-12 leaves that agent to it alone: its name and description carry no C-5 role, so C-5 is silent', !audit74(edit.d).findings.some(f => f.id === 'C-5'));
   one('notools', { [KINDS]: table(GOOD_ROW), '.claude/agents/design-fidelity.md': agent('design-fidelity', null) }, f => /declares no tools list/.test(f.what), 'a row whose agent declares no tools list is one finding');
-  // An agent whose name carries a C-5 role. C-5 ranges from 7.0.0, so whether it
-  // runs depends on where the project was last audited; either way one finding.
+  // An agent whose name carries a C-5 role. C-5 runs on every upgrade (#305), so
+  // it reports the agent and C-12 leaves it: one finding. C-12's own report of
+  // such an agent covers a run where C-5 is out of range, shown with a copy of
+  // the conventions whose C-5 is tied to its version again.
   const roleFiles = { [KINDS]: table(GOOD_ROW.replace('design-fidelity', 'design-finder')), '.claude/agents/design-finder.md': agent('design-finder', 'Read, Edit') };
   r = audit74(kindsCase('role-c5-out', roleFiles));
-  check('an agent with a C-5 role, audited after 7.0.0 (C-5 out of range): C-12 reports it, once', c12(r).length === 1 && /is granted Edit/.test(c12(r)[0].what) && !r.findings.some(f => f.id === 'C-5'), JSON.stringify(r.findings.map(f => f.id)));
+  check('an agent with a C-5 role, audited after 7.0.0: C-5 reports it on every upgrade, and C-12 leaves it, once', c12(r).length === 0 && r.findings.filter(f => f.id === 'C-5').length === 1, JSON.stringify(r.findings.map(f => f.id)));
+  const C5_VERSIONED = path.join(TMP, 'conventions-c5-versioned.md');
+  fs.writeFileSync(C5_VERSIONED, read(REAL_CONVENTIONS).split('### C-5: ').map((b, i) => (i === 1 ? b.replace('- **Runs:** every upgrade\n', '') : b)).join('### C-5: '));
+  r = audit(kindsCase('role-c5-versioned', roleFiles), [], { pluginRoot: PLUGIN74, conventions: C5_VERSIONED });
+  check('with C-5 tied to its version again (out of range after 7.0.0), C-12 reports that agent, once', c12(r).length === 1 && /is granted Edit/.test(c12(r)[0].what) && !r.findings.some(f => f.id === 'C-5'), JSON.stringify(r.findings.map(f => f.id)));
   const roleIn = kindsCase('role-c5-in', roleFiles);
   write(roleIn, '.claude/.toolkit-state.json', JSON.stringify({ version: '6.3.3', path: 'plugin', auditedVersion: '6.3.3' }, null, 2));
   r = audit74(roleIn);
@@ -3576,7 +3586,7 @@ console.log('\n9g. the lessons files keep both sides on a merge (C-18)');
   check('  the C-18 mutation that ignores git\'s answer applies to the source', m.applied);
   check('  with it, the seed-attributes project is flagged, so the clean checks above bite', c18(audit800(c18Case('seed-mutant', { lessons: ['LESSONS.md'], attrs: seedAttrs.join('\n') }), [], { script: m.path })).length === 1);
   const entry = read(REAL_CONVENTIONS).split(/^### /m).find(b => /^C-18:/.test(b)) || '';
-  check('the real C-18 entry is a lessons-merge convention since 8.0.0 at Severity suggest, not run on every upgrade', /^- \*\*Since:\*\* 8\.0\.0$/m.test(entry) && /^- \*\*Detector:\*\* lessons-merge$/m.test(entry) && /^- \*\*Severity:\*\* suggest$/m.test(entry) && !/^- \*\*Runs:\*\*/m.test(entry), entry.slice(0, 300));
+  check('the real C-18 entry is a lessons-merge convention since 8.0.0 at Severity suggest, run once per project (#305)', /^- \*\*Since:\*\* 8\.0\.0$/m.test(entry) && /^- \*\*Detector:\*\* lessons-merge$/m.test(entry) && /^- \*\*Severity:\*\* suggest$/m.test(entry) && /^- \*\*Runs:\*\* once$/m.test(entry), entry.slice(0, 300));
 }
 }
 if (OWN('9h')) {
@@ -4112,10 +4122,25 @@ console.log('\n13. a run-once check is owed once (issue #289)');
   // the script cannot drift apart unnoticed.
   const realBlocks = read(REAL_CONVENTIONS).replace(/\r\n/g, '\n').split(/\n(?=### C-\d+: )/).filter(b => /^### C-\d+: /.test(b));
   const markedOnce = realBlocks.filter(b => /^- \*\*Runs:\*\* once$/m.test(b)).map(b => /^### (C-\d+): /.exec(b)[1]);
+  const markedAlways = realBlocks.filter(b => /^- \*\*Runs:\*\* every upgrade$/m.test(b)).map(b => /^### (C-\d+): /.exec(b)[1]);
   const FRESH_REAL = projectAt('fresh-real', [stateAt(CUR_V)]);
   r = spawnSync('node', [SCRIPT, '--project', FRESH_REAL, '--plugin-root', NEXT, '--conventions', REAL_CONVENTIONS], { encoding: 'utf8' });
-  check('289: the shipped conventions mark C-13 and C-20 run-once and no other entry',
-    markedOnce.join(',') === 'C-13,C-20' && r.status === 0 && /; 2 run-once check\(s\) owed \[C-13, C-20\]; /.test(r.stderr), markedOnce.join(',') + ' | ' + said289(r));
+  // #305: of the four checks a later project never got, C-5 (no edit tools on a
+  // finder or judge) runs on every upgrade, C-4 (an agent's output contract)
+  // and C-18 (the lessons files' union merge) run once, and C-17 is unchanged.
+  check('305: the shipped conventions mark C-4, C-13, C-18 and C-20 run-once and C-5 on every upgrade',
+    markedOnce.join(',') === 'C-4,C-13,C-18,C-20' && markedAlways.includes('C-5') && !markedOnce.includes('C-17') && !markedAlways.includes('C-17')
+      && r.status === 0 && /; 4 run-once check\(s\) owed \[C-4, C-13, C-18, C-20\]; /.test(r.stderr), markedOnce.join(',') + ' | C-5 always: ' + markedAlways.includes('C-5') + ' | ' + said289(r));
+  // A project already audited at the current version adds a judge with every
+  // tool: C-5 must still flag it, by its own id, since it no longer waits for
+  // an upgrade whose range crosses 7.0.0.
+  const C5_NOW = projectAt('c5-current', [stateAt(CUR_V)]);
+  write(C5_NOW, '.claude/agents/my-judge.md', '---\nname: my-judge\ndescription: Judges a plan\n---\nOurs.\n');
+  const c5Now = audit(C5_NOW);
+  const c5Range = (/-> \S+ \[([^\]]*)\]/.exec(c5Now.summary) || [])[1] || '';
+  check('305: C-5 runs on every upgrade: a project audited at the current version still gets its edit-capable judge agent flagged by C-5',
+    c5Now.status === 0 && c5Range.split(', ').includes('C-5') && c5Now.findings.some(f => f.id === 'C-5' && f.file.relPath === '.claude/agents/my-judge.md'),
+    c5Now.status + ' | range [' + c5Range + '] | ' + c5Now.findings.map(f => f.id).join(','));
   const skillText = read(path.join(REPO, '.claude', 'skills', 'upgrade', 'SKILL.md')).replace(/\r\n/g, '\n');
   const scriptText = read(SCRIPT);
   // A step of the skill: from its heading to the next heading of the same level.
@@ -4125,10 +4150,10 @@ console.log('\n13. a run-once check is owed once (issue #289)');
   const STOP_WORDS = 'upgrade-audit: wrong folder:';
   const s1 = stepOf('1. Audit for candidates'), s3 = stepOf('3. Judge the manual conventions'), s3b = stepOf('3b. Run the prompt audit (C-13)'), s7 = stepOf('7. Stamp');
   check('289: the upgrade skill runs each run-once check the script lists, in range or owed',
-    scriptText.includes(OWED_WORDS) && scriptText.includes(DONE_WORDS) && s1.includes('run-once check(s) owed [C-13, C-20]') && /an owed run-once check/.test(s1)
-      && /owed as a run-once check/.test(s3) && /owed as a run-once check/.test(s3b) && s7.includes('onceDone') && s7.includes('run-once check(s) as done: C-13, C-20')
+    scriptText.includes(OWED_WORDS) && scriptText.includes(DONE_WORDS) && s1.includes('run-once check(s) owed [C-4, C-13, C-18, C-20]') && /an owed run-once check/.test(s1)
+      && /owed as a run-once check/.test(s3) && /owed as a run-once check/.test(s3b) && s7.includes('onceDone') && s7.includes('run-once check(s) as done: C-4, C-13, C-18, C-20')
       && !skillText.includes('on the upgrade that brings C-13'),
-    [s1.includes('run-once check(s) owed [C-13, C-20]'), /an owed run-once check/.test(s1), /owed as a run-once check/.test(s3), /owed as a run-once check/.test(s3b), s7.includes('onceDone'), s7.includes('run-once check(s) as done: C-13, C-20')].join(','));
+    [s1.includes('run-once check(s) owed [C-4, C-13, C-18, C-20]'), /an owed run-once check/.test(s1), /owed as a run-once check/.test(s3), /owed as a run-once check/.test(s3b), s7.includes('onceDone'), s7.includes('run-once check(s) as done: C-4, C-13, C-18, C-20')].join(','));
   check('291: the upgrade skill relays the stop line and ends the run',
     scriptText.includes("'" + STOP_WORDS + " '") && s1.includes('`' + STOP_WORDS + '`') && /main copy/.test(s1) && /top folder/.test(s1) && /relay that line[^.]*and stop/.test(s1),
     [s1.includes('`' + STOP_WORDS + '`'), /main copy/.test(s1), /top folder/.test(s1), /relay that line[^.]*and stop/.test(s1)].join(','));

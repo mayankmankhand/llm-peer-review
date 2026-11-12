@@ -2599,8 +2599,9 @@ function main() {
             '{ test ! -d .claude/agents || W=' + shq(name) + ' find .claude/agents -type f -name ' + shq('*.md') + ' -exec awk ' + shq(AGENT_NAMED_AWK) + ' {} + ; }',
             'the check exits 0 only while no agent file declares name: ' + name + ' in its frontmatter, or is named ' + name + '.md while declaring no name');
           // An agent C-5 covers by its role is left to C-5, but only in a run
-          // where C-5 is in range: C-5 ranges from 7.0.0, so on a later upgrade
-          // nothing else would report an agent added since.
+          // where C-5 is in range. C-5 runs on every upgrade from 8.0.21
+          // (#305); the test keeps this check reporting such an agent should
+          // C-5 ever leave the range.
           if (inRange.some(x => x.detector === 'agent-tools') && JUDGE_ROLE.test((hit.fm.name || path.basename(hit.rel, '.md')) + ' ' + hit.fm.description)) return;
           if (hit.fm.toolsIdx >= 0 && !hit.fm.edits.length) return;
           row('edit-access', 'dispatches `' + name + '` (' + hit.rel + ') as a finder, and that agent ' + (hit.fm.toolsIdx >= 0 ? 'is granted ' + hit.fm.edits.join(', ') : 'declares no tools list, so it gets every tool, Edit included') + ': it can change files before the audit judges its findings. Its output contract is C-4\'s to judge.',
