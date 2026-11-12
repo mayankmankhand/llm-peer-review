@@ -79,6 +79,7 @@ git(PROJECT, ['worktree', 'add', '-q', '-b', 'wt-1', WORKTREE]);
 const WORKTREE_SUB = path.join(WORKTREE, 'src');
 fs.mkdirSync(WORKTREE_SUB, { recursive: true });
 git(OTHER_REPO, ['init', '-q']);
+git(SPACED, ['init', '-q']);
 fs.symlinkSync(PROJECT, LINK);
 const ENV = { CLAUDE_PROJECT_DIR: PROJECT };
 
@@ -116,8 +117,8 @@ console.log('\n1. the decision');
 {
   const a = judge(bash('cd ' + OUTSIDE + ' && ls', SUB), ENV);
   const b = judge(bash('cd ' + PROJECT + ' && node x.js > out.txt', SUB), ENV);
-  check('282: a command that starts with cd to an absolute path and && is silent, even when the reader refuses what follows',
-    silent(a) && silent(b), shown(a) + ' | ' + shown(b));
+  check('282: a command that starts with cd to the project root and && is silent, even when the reader refuses what follows; one that starts with cd out of the project is denied (#307)',
+    denied(a) && silent(b), shown(a) + ' | ' + shown(b));
 }
 {
   const a = judge(bash('cd .. && ls', SUB), ENV);
@@ -186,6 +187,88 @@ console.log('\n1. the decision');
   const d = judge('not a call', ENV);
   check('282: a missing CLAUDE_PROJECT_DIR, a missing cwd or unreadable input stays silent',
     silent(a) && silent(b) && silent(c) && silent(d), [a, b, c, d].map(shown).join(' | '));
+}
+
+console.log('\n1b. a cd out of the project, refused at the call (#307)');
+// The cd itself is judged now, wherever the shell sits: the old pass-through
+// for `cd <absolute path> &&` let Claude's shell land outside the project,
+// and the guard caught it only on the next call.
+const HOME_DIR = path.join(SCRATCH, 'home');
+const MEMORY = path.join(HOME_DIR, '.claude', 'projects', '-scratch-project', 'memory');
+fs.mkdirSync(MEMORY, { recursive: true });
+const ENV_HOME = { CLAUDE_PROJECT_DIR: PROJECT, HOME: HOME_DIR };
+const namesPaths = (r) => denied(r) && /paths/.test(r.result.reason) && !/lets through/.test(r.result.reason);
+{
+  const a = judge(bash('cd ' + OUTSIDE + ' && ls', PROJECT), ENV);
+  const b = judge(bash('cd ' + OUTSIDE, PROJECT), ENV);
+  check('307: a cd into a scratch folder from the project root is refused',
+    namesPaths(a) && namesPaths(b) && a.result.reason.includes(OUTSIDE), shown(a) + ' | ' + shown(b));
+}
+{
+  const r = judge(bash('cd ' + MEMORY + ' && grep -n x MEMORY.md', PROJECT), ENV_HOME);
+  check('307: a cd into the memory folder from the project root is refused', namesPaths(r), shown(r));
+}
+{
+  const a = judge(bash('cd ' + SUB + ' && node x.js', PROJECT), ENV);
+  const b = judge(bash('cd sub && ls', PROJECT), ENV);
+  check('307: a cd into a project subfolder, by full or relative path, is refused', namesPaths(a) && namesPaths(b), shown(a) + ' | ' + shown(b));
+}
+{
+  const got = ['ls; cd ' + OUTSIDE, 'ls || cd ' + OUTSIDE, 'ls\ncd ' + OUTSIDE, 'true && cd ' + OUTSIDE, 'ls 2>/dev/null; cd ' + OUTSIDE]
+    .map((c) => judge(bash(c, PROJECT), ENV));
+  check('307: a cd after ;, ||, a new line or && is refused', got.every(namesPaths), got.map(shown).join(' | '));
+}
+{
+  const got = ['cd', 'cd ~', 'cd ~/notes', 'cd -'].map((c) => judge(bash(c, PROJECT), ENV_HOME));
+  check('307: a bare cd, cd ~, cd ~/notes and cd - are refused', got.every(namesPaths), got.map(shown).join(' | '));
+}
+{
+  const a = judge(bash('cd ' + OUTSIDE + ' && node x.js > out.txt', PROJECT), ENV);
+  const b = judge(bash('node x.js > out.txt; cd ' + OUTSIDE, PROJECT), ENV);
+  check('307: a cd in a command the reader refuses whole is still read and refused', namesPaths(a) && namesPaths(b), shown(a) + ' | ' + shown(b));
+}
+{
+  const got = ['cd ' + PROJECT, 'cd ' + PROJECT + ' && ls', 'cd ' + WORKTREE, 'cd ' + WORKTREE + ' && git status', 'cd ' + OTHER_REPO, 'git status && cd ' + PROJECT]
+    .map((c) => judge(bash(c, PROJECT), ENV));
+  const fromSub = judge(bash('cd ' + WORKTREE + ' && git status', SUB), ENV);
+  check('307: a cd to the project root or to a working copy\'s top folder still passes', got.every(silent) && silent(fromSub), got.concat([fromSub]).map(shown).join(' | '));
+}
+{
+  const helper = { agent_id: 'a1b2c3', agent_type: 'review-browser-finder' };
+  const r = judge(bash('cd ' + OUTSIDE + ' && ls', PROJECT, helper), ENV);
+  check('307: a helper\'s cd is left alone, since it does not carry to the helper\'s next call', silent(r), shown(r));
+}
+{
+  // From the replay over saved sessions: a here-document's text and a quoted
+  // | or ; are not places a command starts.
+  const got = [
+    "python3 - <<'EOF'\nprint(1)\ncd " + OUTSIDE + "\nEOF",
+    'grep -n "usage\\|cd \\|branch" f.md; echo "$(date)"',
+    'echo "a; cd ' + OUTSIDE + '"',
+  ].map((c) => judge(bash(c, PROJECT), ENV));
+  const after = judge(bash("cat > f.txt <<EOF\ncd x\nEOF\ncd " + OUTSIDE, PROJECT), ENV);
+  check('307: here-document text and a quoted | or ; are not read as commands, and a cd after the here-document is',
+    got.every(silent) && namesPaths(after), got.concat([after]).map(shown).join(' | '));
+}
+{
+  const got = ['cd "$S/trial" && ls', 'cd $HOME/x', 'cd `pwd`/x', 'S=/tmp/x; cd "$S"', 'cd ' + SCRATCH + '/out* && ls'].map((c) => judge(bash(c, PROJECT), ENV));
+  check('307: a cd to a folder held in a variable, a backtick or a wildcard is refused, since the guard cannot see where it goes',
+    got.every(namesPaths) && got.every((r) => /cannot see/.test(r.result.reason)), got.map(shown).join(' | '));
+}
+{
+  const a = judge(bash('cd -P ' + OUTSIDE, PROJECT), ENV);
+  const b = judge(bash('cd ' + OUTSIDE + ' 2>/dev/null; ls', PROJECT), ENV);
+  const c = judge(bash('if true; then cd ' + OUTSIDE + '; fi', PROJECT), ENV);
+  const d = judge(bash('cd ' + PROJECT + ' 2>/dev/null && ls', PROJECT), ENV);
+  check('307: a cd with an option, a trailing redirect or after then is read', namesPaths(a) && namesPaths(b) && namesPaths(c) && silent(d), [a, b, c, d].map(shown).join(' | '));
+}
+{
+  const got = ['(cd ' + OUTSIDE + ' && ls)', 'x=$(cd ' + OUTSIDE + ' && pwd); echo "$x"'].map((c) => judge(bash(c, PROJECT), ENV));
+  check('307: a cd inside a subshell or a command substitution is not a move', got.every(silent), got.map(shown).join(' | '));
+}
+{
+  const r = judge(bash('ls', SUB), ENV);
+  check('307: the step-back refusal no longer recommends a cd before &&', denied(r) && !/lets through/.test(r.result.reason), shown(r));
 }
 
 console.log('\n2. the hook, run the way Claude Code runs it');

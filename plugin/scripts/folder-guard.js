@@ -22,12 +22,24 @@
 //   - the shell at the top folder of any git working copy: a worktree /merge
 //     steps into with a lone cd, a session moved into a worktree, another
 //     repository on purpose;
-//   - a Bash command whose first part is `cd <absolute path>`, alone or
-//     followed by &&: it names its own folder, so the shell's does not matter.
-//     A lone `cd <root>` is how Claude steps back, and it asks for no approval;
+//   - while the shell is elsewhere, a Bash command whose first part is
+//     `cd <absolute path>`, alone or followed by &&, to one of those two kinds
+//     of folder. A lone `cd <root>` is how Claude steps back, and it asks for
+//     no approval;
 //   - any other tool, which names its own file.
 // Anything else is denied (PreToolUse) or blocked once (Stop), with the reason
 // Claude reads: where the shell is, and the cd that steps back.
+//
+// The cd itself is judged too, wherever the shell sits (issue #307): a Bash
+// command with a cd to any other folder is denied at that call, wherever the
+// cd starts a command (the start, or after &&, ;, ||, | or a new line), full
+// path or relative, a bare `cd` and `~` read as the home folder, and `cd -`
+// or a folder held in a variable, a backtick or a wildcard refused because
+// the guard cannot see it. Before, a command that started with
+// `cd <absolute path> &&` passed whatever the folder, the shell stayed there,
+// and only the next call was refused: the lessons log recorded that slip
+// three times. A helper's cd is left alone (its input
+// carries agent_id): Claude Code does not carry it to the helper's next call.
 //
 // It never answers "allow", like the push guard: a hook's allow would skip a
 // prompt the owner's settings or auto mode would show. And it fails open: a
@@ -42,6 +54,7 @@
 // to the real ones.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -101,6 +114,141 @@ function startsWithAbsoluteCd(command, platform) {
   return head !== null && !head.more;
 }
 
+// The home folder a bare `cd` or a `~` names: the hook's own environment first,
+// so a test can set it.
+function homeOf(env) { return (env && (env.HOME || env.USERPROFILE)) || os.homedir(); }
+
+// The parts of a command where a new command can start: split at &&, ||, ;,
+// |, & and a new line, but never inside quotes, and with the body of each
+// here-document (`<<WORD` up to the line WORD) skipped. The checks runner's
+// word reader refuses quotes holding a $, a here-document and a $( ) outright,
+// so the cd reading has its own small reader: the replay over saved sessions
+// (issue #307) found Python inside a here-document, and a | inside a quoted
+// grep pattern, read as commands when the text was split blindly.
+function commandParts(command) {
+  const s = String(command);
+  const parts = [];
+  const pending = [];
+  let cur = '';
+  let quote = null;
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (quote) {
+      cur += ch;
+      if (ch === '\\' && quote === '"' && i + 1 < s.length) { cur += s[i + 1]; i += 2; continue; }
+      if (ch === quote) quote = null;
+      i++;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < s.length) { cur += ch + s[i + 1]; i += 2; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; cur += ch; i++; continue; }
+    if (s.startsWith('<<', i) && s[i + 2] !== '<') {
+      const m = /^<<-?[ \t]*(['"]?)([A-Za-z0-9_]+)\1/.exec(s.slice(i));
+      if (m) { pending.push(m[2]); cur += m[0]; i += m[0].length; continue; }
+    }
+    if (ch === '\n') {
+      parts.push(cur);
+      cur = '';
+      i++;
+      while (pending.length) {
+        const word = pending.shift();
+        while (i < s.length) {
+          let end = s.indexOf('\n', i);
+          if (end === -1) end = s.length;
+          const line = s.slice(i, end);
+          i = end + 1;
+          if (line.replace(/^\t+/, '') === word) break;
+        }
+      }
+      continue;
+    }
+    const two = s.slice(i, i + 2);
+    if (two === '&&' || two === '||') { parts.push(cur); cur = ''; i += 2; continue; }
+    if (ch === ';' || ch === '|' || ch === '&') { parts.push(cur); cur = ''; i++; continue; }
+    cur += ch;
+    i++;
+  }
+  parts.push(cur);
+  return parts;
+}
+
+// The words of one part, the shell's way: quotes joined into the word they
+// sit in, a backslash taking the next character, a redirection (2>/dev/null)
+// ending the word list. `dynamic` marks a word whose value the shell would
+// work out at run time ($VAR, a backtick, or an unquoted wildcard), outside
+// single quotes.
+function partWords(part) {
+  const s = String(part);
+  const out = [];
+  let i = 0;
+  while (i < s.length) {
+    while (i < s.length && /\s/.test(s[i])) i++;
+    if (i >= s.length || /[<>]/.test(s[i]) || /^\d+[<>]/.test(s.slice(i))) break;
+    let text = '';
+    let quoted = false;
+    let dynamic = false;
+    while (i < s.length && !/\s/.test(s[i]) && !/[<>]/.test(s[i])) {
+      const ch = s[i];
+      if (ch === "'") {
+        const e = s.indexOf("'", i + 1);
+        const stop = e === -1 ? s.length : e;
+        text += s.slice(i + 1, stop);
+        quoted = true;
+        i = stop + 1;
+        continue;
+      }
+      if (ch === '"') {
+        let j = i + 1;
+        while (j < s.length && s[j] !== '"') {
+          if (s[j] === '\\' && j + 1 < s.length) { text += s[j + 1]; j += 2; continue; }
+          if (s[j] === '$' || s[j] === '`') dynamic = true;
+          text += s[j];
+          j++;
+        }
+        quoted = true;
+        i = j + 1;
+        continue;
+      }
+      if (ch === '\\' && i + 1 < s.length) { text += s[i + 1]; i += 2; continue; }
+      if (ch === '$' || ch === '`' || ch === '*' || ch === '?' || ch === '[') dynamic = true;
+      text += ch;
+      i++;
+    }
+    out.push({ text: text, quoted: quoted, dynamic: dynamic });
+  }
+  return out;
+}
+
+// Words that can stand before a command at the start of a part.
+const LEADS = new Set(['{', '!', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', 'time']);
+
+// Every folder a command's cd words go to, resolved the way the shell would: a
+// relative path against the shell's folder, a bare `cd`, `~` and `~/...` from
+// the home folder. A target the guard cannot know comes back as null: `cd -`
+// (the previous folder) and a folder held in a variable, a backtick or a
+// wildcard. A cd
+// inside ( ) or $( ) runs in a subshell and moves nothing, so its part starts
+// with `(` or `$(` and is not read as a cd.
+function cdTargets(command, here, env, platform) {
+  const p = pathApi(platform);
+  const targets = [];
+  for (const part of commandParts(command)) {
+    const words = partWords(part);
+    let k = 0;
+    while (k < words.length && !words[k].quoted && LEADS.has(words[k].text)) k++;
+    if (k >= words.length || words[k].quoted || words[k].text !== 'cd') continue;
+    k++;
+    while (k < words.length && !words[k].quoted && /^-[LPe@]+$/.test(words[k].text)) k++;
+    const arg = words[k];
+    if (arg === undefined) targets.push(homeOf(env));
+    else if (arg.dynamic || (arg.text === '-' && !arg.quoted)) targets.push(null);
+    else if (!arg.quoted && (arg.text === '~' || arg.text.startsWith('~/'))) targets.push(p.resolve(homeOf(env), arg.text.slice(2)));
+    else targets.push(p.resolve(here, arg.text));
+  }
+  return targets;
+}
+
 // A folder as Claude would type it in the step back: bare when plain, quoted
 // otherwise (a space, a quote, a backslash).
 function shellWord(p) {
@@ -108,7 +256,12 @@ function shellWord(p) {
 }
 function denyReason(here, root, what) {
   return 'folder-guard: Claude\'s shell is in ' + here + ', not the project folder ' + root + ', so this ' + what + ' would run in the wrong place. Step back with `cd ' + shellWord(root) +
-    '` as a Bash command of its own, then run it again. A command that has to run elsewhere can start with `cd <full path> &&`, which the guard lets through.';
+    '` as a Bash command of its own, then run it again. A command that needs another folder names it in its own paths instead of moving into it.';
+}
+function cdReason(target, root) {
+  const where = target === null ? 'a folder the guard cannot see (`cd -`, or a folder held in a variable, a backtick or a wildcard),' : target + ',';
+  return 'folder-guard: this command moves Claude\'s shell to ' + where + ' outside the project folder ' + root +
+    ', and the move would stay in force for the next command. Name that folder in the command\'s own paths instead of moving into it (for example `ls <folder>/` or `grep -n x <folder>/<file>`). A cd to the project folder, or to the top folder of a git working copy such as a worktree, still runs.';
 }
 function stopReason(here, root) {
   return 'folder-guard: Claude\'s shell is still in ' + here + ', not the project folder ' + root + '. Step back with `cd ' + shellWord(root) +
@@ -129,15 +282,26 @@ function decide(input, env, deps) {
   if (!stopping && !GUARDED.has(input.tool_name)) return null;
   const root = d.realpath(rootRaw);
   const here = d.realpath(input.cwd);
-  if (samePath(here, root, d.platform) || d.isWorkingCopyTop(here)) return null;
-  if (stopping) return { decision: 'block', reason: stopReason(here, root) };
+  // The two kinds of folder the shell may sit in, or a cd may go to.
+  const allowed = (folder) => samePath(d.realpath(folder), root, d.platform) || d.isWorkingCopyTop(d.realpath(folder));
+  const hereOk = samePath(here, root, d.platform) || d.isWorkingCopyTop(here);
+  if (stopping) return hereOk ? null : { decision: 'block', reason: stopReason(here, root) };
   if (input.tool_name === 'Bash') {
     const command = input.tool_input && input.tool_input.command;
     if (typeof command !== 'string') return null;
+    // The cd itself (#307), for the main session only: a helper's input carries
+    // agent_id, and its cd never reaches its next call.
+    const helper = typeof input.agent_id === 'string' && input.agent_id !== '';
+    if (!helper) {
+      let targets;
+      try { targets = cdTargets(command, here, env, d.platform); } catch (e) { return null; }
+      for (const t of targets) if (t === null || !allowed(t)) return { decision: 'deny', reason: cdReason(t, root) };
+    }
+    if (hereOk) return null;
     let named;
     try { named = startsWithAbsoluteCd(command, d.platform); } catch (e) { return null; }
     if (named) return null;
-  }
+  } else if (hereOk) return null;
   return { decision: 'deny', reason: denyReason(here, root, WHAT[input.tool_name]) };
 }
 
@@ -157,4 +321,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { decide: decide, startsWithAbsoluteCd: startsWithAbsoluteCd };
+module.exports = { decide: decide, startsWithAbsoluteCd: startsWithAbsoluteCd, cdTargets: cdTargets, commandParts: commandParts };
