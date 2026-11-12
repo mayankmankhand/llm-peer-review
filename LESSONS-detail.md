@@ -870,6 +870,7 @@
 
 - **Reach a folder outside the repo by absolute path, never by `cd`: the session's working folder moves with it.** Twice in the #290 session a Bash call began with `cd` into a folder outside the side copy, once into the main copy's `reports/checks` and once into the memory folder. Both sit inside the session's working directories, so the move carried into every later call, and the next relative paths would have read the wrong copy. Each was caught at once and undone with a `cd` back to the side copy. The retired lesson on confirming `pwd` before dispatching typed agents records the same move in the 257-259 review.
   - Incident 2026-11-12 (#303 to #305, the exploration), the second: a Bash call moved into the session's scratch folder and left the shell there. The folder guard stopped the turn, and a lone `cd` back to the project fixed it. Receipt: the folder guard's stop message in this session's transcript.
+  - Incident 2026-11-12 (the v8.0.21 release), the third: while updating the cycle's memory note, a call began with `cd` into the memory folder to search a file, and the session's working folder moved there; a lone `cd` back on the next call fixed it. All three went through the folder guard's `cd <absolute path>` exemption, which its own refusal text recommends. Offered the owner a check; on their yes it was filed as #307. Receipt: the session's working-folder change notice in this session's transcript.
 
 ## Issues 303 to 305 (the map at /merge, every FAIL line, the upgrade schedule)
 
