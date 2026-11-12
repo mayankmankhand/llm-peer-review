@@ -22,11 +22,11 @@
     "commands/codebase-to-course.md": 1586,
     "commands/create-issue.md": 2016,
     "commands/create-plan.md": 7918,
-    "commands/document.md": 10802,
+    "commands/document.md": 10662,
     "commands/execute.md": 6867,
     "commands/explore.md": 7504,
-    "commands/index.md": 2979,
-    "commands/merge.md": 7783,
+    "commands/index.md": 3001,
+    "commands/merge.md": 7965,
     "commands/pair-debug.md": 938,
     "commands/peer-review.md": 2150,
     "commands/review.md": 8996,
@@ -39,7 +39,7 @@
     "skills/error-analysis/SKILL.md": 2677,
     "skills/html-viewing/SKILL.md": 2047,
     "skills/learning-opportunity/SKILL.md": 259,
-    "skills/loop-rules/SKILL.md": 7141,
+    "skills/loop-rules/SKILL.md": 7233,
     "skills/playground/SKILL.md": 4167,
     "skills/project-context/SKILL.md": 343,
     "skills/report-rules/SKILL.md": 4716,
@@ -63,7 +63,7 @@
     "skills/review-ux/SKILL.md": 3129,
     "skills/security-audit/SKILL.md": 3830,
     "skills/setup/SKILL.md": 1443,
-    "skills/upgrade/SKILL.md": 6244,
+    "skills/upgrade/SKILL.md": 6249,
     "skills/writing/SKILL.md": 828
   }
 }

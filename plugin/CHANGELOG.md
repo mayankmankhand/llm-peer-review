@@ -1,5 +1,45 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.20, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.21, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.21 - The Map Waits for Main (2026-11-12)
+
+**`/tk:document` no longer refreshes the codebase map, `/tk:merge` offers to once work has landed on main, and three upgrade checks now run on a schedule that reaches every project (#303, #305).** The map describes main, and `/tk:document` runs before the work lands, often in a side copy. The upgrade's check that your own reviewer and judge agents cannot edit files now runs every time, and two one-time checks reach projects set up after they shipped. A maintainer fix keeps every failing test's name in the release check's summary (#304).
+
+### Added
+
+- **`/tk:merge` offers to refresh the map at its close (#303).** Once per run, after the cleanup, it asks one question when something landed, the project folder is on main, local main holds what landed, and the map is missing or 10 or more commits behind: "Refresh it with `/tk:index` now?" Yes runs `/tk:index`; no leaves the map as it is. When local main is still behind (a landing on the host you have not pulled yet) or the project folder is on another branch, it asks nothing, and its closing words tell you to run `/tk:index` on main.
+
+### Changed
+
+- **`/tk:document` no longer refreshes the codebase map (#303).** It rebuilt `CODEBASE_MAP.md` at the end of a cycle, often in a side copy before the work had landed, where the map described a branch rather than main and was deleted with the side copy's folder. `/tk:explore`, `/tk:create-plan` and `/tk:pair-debug` still refresh it at their start when it is missing or 10 or more commits behind, and `/tk:upgrade` still refreshes it at its close.
+- **`/tk:upgrade`: the check that your own reviewer and judge agents carry no file-editing tools (C-5) runs on every upgrade (#305).** It ran only on the upgrade that crossed 7.0.0, so an agent you added after that was never checked.
+- **`/tk:upgrade`: two checks now run once per project (#305).** The check that each of your own agents says what shape its answer takes (C-4, from 7.0.0) and the suggestion that git keep both sides when two branches each add a lesson (C-18, from 8.0.0) ran only on the upgrade that crossed their version, so a project set up after that never got them. They now use the run-once record v8.0.20 built: a project that began on or after a check's version gets it on its next upgrade, once, and a finding you decline does not come back.
+
+### Fixed
+
+- **Maintainer only: a failing test's name always reaches the release check's summary (#304).** The release check showed only the last 15 lines of a failing suite, so a case whose failure printed several lines could push an earlier case's name out of view, and a plan's check that looked for that name missed it (four times in this repository's builds). The summary now shows every `FAIL` and `not ok` line of a failing suite above those last 15 lines, then the 15 lines as before.
+
+### Upgrading
+
+- Everything arrives with the plugin update, with no setup step and no new permission rows. Run `/tk:upgrade` in each project's main copy.
+- A project that began on 7.0.0 or later gets the answer-shape check (C-4) on this upgrade, once, and one that began on 8.0.0 or later also gets the lesson-merge suggestion (C-18), once. A project whose state file was never saved to git has no record of the version it began on, so it gets both once more.
+- The no-edit-tools check (C-5) now runs on every upgrade, so a reviewer or judge agent of yours that can edit files is reported on each one.
+- If you never land branches with `/tk:merge`, the map now refreshes only at the start of `/tk:explore`, `/tk:create-plan` and `/tk:pair-debug` and at the close of `/tk:upgrade`. Run `/tk:index` yourself when you want it sooner.
+- A copy-install for other editors gets the changed `/document`, `/merge` and `/index` commands and loop rules when you re-run `setup.sh` or `setup.ps1`. The new upgrade schedule comes with the plugin only: a copy-install cannot be audited by `/tk:upgrade`.
+
+### Why
+
+The map's job is to describe main. `/tk:document` runs before the work lands, and often in a side copy, so the map it built described a branch; `/tk:merge` is the first point where the work is on main. A project that never uses side copies never runs `/tk:merge`, so it loses that automatic refresh; the issue accepted that trade.
+
+The upgrade decided whether to run C-4, C-5 and C-18 from the version range alone. C-5 is a safety rule about agents you can add on any day, and it is cheap and exact, so it now runs every time. C-4 is a judgment read and C-18 only a suggestion, so each runs once per project and a declined finding stays declined.
+
+Maintainer only: the #304 fix lives in the release check rather than in each test file, so it covers every suite, future ones included, and nobody has to remember to keep a failure's detail on one line.
+
+Maintainer only: this release changes one overview line in `hitl-loop.md`, a file on the review path, so its catch-rate check asks for new Pocket runs. No review behavior changed and the test rig's budget is nearly spent, so the release ships under the catch-rate override.
+
+### Notes
+
+- Five scripted `/tk:merge` landings on a throwaway project ($3.32) showed the question, the yes answer and the fresh-map case behaving as written. In the yes run, the session's closing words called the refreshed map an uncommitted change, though git ignores it; that wording comes from the map step's own report, which this release does not change.
 
 ## v8.0.20 - Right Step, Right Folder (2026-11-11)
 

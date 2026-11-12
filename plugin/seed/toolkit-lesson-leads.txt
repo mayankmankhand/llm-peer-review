@@ -130,6 +130,7 @@ A standing page rendered in a worktree has no predecessor on disk: copy the main
 A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.
 A standing page that closes findings by file cannot be shared between branches: a sibling branch's copy of the file never had the change.
 A start-of-run check does not cover a later call through a shared link: put the caller's version in the call.
+A step that builds from the working tree first checks that the tree is on the branch its output describes.
 A step that edits a file under `.claude/` rebuilds `plugin/` before its after run.
 A step that redoes an earlier scan must read that scan's snapshot, not the working tree.
 A step that redoes an earlier scan must read the scan's snapshot, not the working tree: the merge re-listed today's files and refused a valid refresh.
@@ -162,6 +163,7 @@ After a security fix, spend one adversarial round on it with a canary outside th
 After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.
 After adding a lesson lead, rebuild `seed/toolkit-lesson-leads.txt` with `scripts/seed-history.js`.
 After moving text between files, sweep for "above", "below" and quoted heading names before calling it done.
+Aim a check at a suite's FAIL line: the release check always shows it, but may cut the list at the end.
 Aim a seeded finding's proof at its claim, never at the absence of a word a guessed fix would add.
 An agent file written mid-session is not dispatchable until the session reloads it.
 An agent with no `model:` line follows `CLAUDE_CODE_SUBAGENT_MODEL`; a role that must stay on the session model says `model: inherit`.
@@ -278,6 +280,7 @@ Judge "never seen" by the code's own walk, and when the real run finds such a ca
 Keep a test's failure detail on one line: the release gate shows only a failing suite's last 15 lines.
 Keep a test's failure detail on one line: the release gate shows only the tail of a failing suite, and long details push the case names a check looks for out of view.
 Keep each failure detail on one line, so the case names a check looks for stay in the release gate's tail.
+Keep issue and release numbers out of the always-read rule files; the changelog holds that history.
 Keep verification evidence in the repo as it lands; this machine clears `/tmp` and the scratchpad between days.
 Keeping a record means keeping what it points at: results.json kept every run's rows while a same-id rerun overwrote the output file the older row named.
 Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.
