@@ -42,7 +42,9 @@
 //                    work tree fails the check before any suite runs: several
 //                    suites build fixtures that must not be inside a
 //                    repository. Each suite's line, with a failing suite's
-//                    tail under it, prints as the suite ends; the failed list
+//                    FAIL lines and tail under it, prints as the suite ends
+//                    (every FAIL line, so a case name survives a detail that
+//                    runs over many lines, #304); the failed list
 //                    is sorted by name, and one more line gives the count,
 //                    the wall time and how many ran at a time.
 //                    A default-set run (no --suites) where every suite exited
@@ -236,8 +238,8 @@ const CATCH_OVERRIDE = (() => {
   if (v) console.error('release-check: TK_RELEASE_CATCH_OVERRIDE is set; a failing catch-rate check passes with this reason: ' + v);
   return v;
 })();
-// The most of a suite's output kept, per stream: a failing suite shows only
-// its last 15 lines.
+// The most of a suite's output kept, per stream: a failing suite shows its
+// FAIL lines and its last 15 lines.
 const OUTPUT_KEEP = 4 * 1024 * 1024;
 // The same for asking a remote about the release tag. A credential prompt can
 // never be answered from inside a hook, so git is told not to ask.
@@ -341,6 +343,17 @@ function defaultSuites() {
 function tail(text, lines) {
   const all = text.replace(/\s+$/, '').split('\n');
   return all.slice(-lines).map(l => '         | ' + l).join('\n');
+}
+
+// A failing suite's printout (#304): every FAIL line above its last `lines`
+// lines, then those lines, as tail() prints them. A case's detail can run over
+// many lines and push its FAIL line, which carries the case name a plan's check
+// looks for, out of the tail; a FAIL line the tail already holds is not
+// printed twice.
+function failingTail(text, lines) {
+  const all = text.replace(/\s+$/, '').split('\n');
+  const above = all.slice(0, Math.max(0, all.length - lines)).filter(l => /^\s*FAIL\b/.test(l));
+  return above.concat(all.slice(-lines)).map(l => '         | ' + l).join('\n');
 }
 
 // Semver precedence: X.Y.Z numerically, then a release outranks any
@@ -531,7 +544,7 @@ async function checkSuites() {
     while (next < order.length) {
       const r = await runSuite(order[next++], tempRoot);
       // One write per suite, its tail directly under its line.
-      const tailText = !r.ok && r.out.trim() ? '\n' + tail(r.out, 15) : '';
+      const tailText = !r.ok && r.out.trim() ? '\n' + failingTail(r.out, 15) : '';
       console.log('         ' + r.line + tailText);
       done.push(r);
     }
