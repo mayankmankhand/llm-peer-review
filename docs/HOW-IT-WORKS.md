@@ -102,6 +102,7 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 - **Any flag stops that pull request** and asks you: fix it, keep it on purpose, land it as it is, or stop.
 - **Landing on GitHub or GitLab asks you once** per run.
 - **Then it brings each worktree's records home:** the plans, reports and receipts git does not track, which removing the worktree would delete. It also folds each branch's cycle page into the main one. One question at the end offers to remove each worktree and its branch.
+- **Then it may ask about the map:** when something landed and the codebase map is missing or 10 or more commits behind main, it asks once whether to refresh it with `/tk:index`. Say no and the map stays as it is.
 
 
 ## Gate in and gate out

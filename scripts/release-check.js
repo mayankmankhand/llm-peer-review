@@ -42,9 +42,10 @@
 //                    work tree fails the check before any suite runs: several
 //                    suites build fixtures that must not be inside a
 //                    repository. Each suite's line, with a failing suite's
-//                    FAIL lines and tail under it, prints as the suite ends
-//                    (every FAIL line, so a case name survives a detail that
-//                    runs over many lines, #304); the failed list
+//                    failure lines and tail under it, prints as the suite
+//                    ends (every FAIL or "not ok" line, so a case name
+//                    survives a detail that runs over many lines, #304); the
+//                    failed list
 //                    is sorted by name, and one more line gives the count,
 //                    the wall time and how many ran at a time.
 //                    A default-set run (no --suites) where every suite exited
@@ -239,7 +240,7 @@ const CATCH_OVERRIDE = (() => {
   return v;
 })();
 // The most of a suite's output kept, per stream: a failing suite shows its
-// FAIL lines and its last 15 lines.
+// failure lines and its last 15 lines.
 const OUTPUT_KEEP = 4 * 1024 * 1024;
 // The same for asking a remote about the release tag. A credential prompt can
 // never be answered from inside a hook, so git is told not to ask.
@@ -345,14 +346,15 @@ function tail(text, lines) {
   return all.slice(-lines).map(l => '         | ' + l).join('\n');
 }
 
-// A failing suite's printout (#304): every FAIL line above its last `lines`
-// lines, then those lines, as tail() prints them. A case's detail can run over
-// many lines and push its FAIL line, which carries the case name a plan's check
-// looks for, out of the tail; a FAIL line the tail already holds is not
-// printed twice.
+// A failing suite's printout (#304): every failure line above its last `lines`
+// lines, then those lines, as tail() prints them. A failure line is one that
+// starts with FAIL, or with "not ok" in the suites that report TAP style. A
+// case's detail can run over many lines and push its failure line, which
+// carries the case name a plan's check looks for, out of the tail; a failure
+// line the tail already holds is not printed twice.
 function failingTail(text, lines) {
   const all = text.replace(/\s+$/, '').split('\n');
-  const above = all.slice(0, Math.max(0, all.length - lines)).filter(l => /^\s*FAIL\b/.test(l));
+  const above = all.slice(0, Math.max(0, all.length - lines)).filter(l => /^\s*(?:FAIL|not ok)\b/.test(l));
   return above.concat(all.slice(-lines)).map(l => '         | ' + l).join('\n');
 }
 

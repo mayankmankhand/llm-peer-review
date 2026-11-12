@@ -474,6 +474,17 @@ function releaseRepo(version, tag, opt) {
   r = run(repo, ['--suites', 'stubs/long-fail.js']);
   check('a failing suite shows every FAIL line, even one above its last 15 lines',
     r.status === 1 && /\| +FAIL +the hidden case - detail line 1$/m.test(r.out) && /\| +detail line 20$/m.test(r.out), summaryLine(r.out));
+  // Five suites report a failure as "not ok - <name>" (TAP style), not FAIL:
+  // the gate lifts those lines the same way.
+  write(repo, 'stubs/long-notok.js', [
+    "const d = Array.from({ length: 20 }, (_, i) => 'detail line ' + (i + 1)).join('\\n');",
+    "console.log('ok - the first case');",
+    "console.log('not ok - the hidden tap case - ' + d);",
+    'process.exit(1);',
+    ''].join('\n'));
+  r = run(repo, ['--suites', 'stubs/long-notok.js']);
+  check('a failing suite shows every not ok line too, even one above its last 15 lines',
+    r.status === 1 && /\| +not ok - the hidden tap case - detail line 1$/m.test(r.out), summaryLine(r.out));
   write(repo, 'stubs/short-fail.js', "console.log('  FAIL  the short case - one line');\nprocess.exit(1);\n");
   r = run(repo, ['--suites', 'stubs/short-fail.js']);
   check('a FAIL line already in the last 15 lines is shown once', r.status === 1 && (r.out.match(/FAIL +the short case/g) || []).length === 1, summaryLine(r.out));
