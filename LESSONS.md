@@ -564,3 +564,8 @@
 
 - **Moving scratch work to one fixed folder needs a look-there-first rule, or a retry copies restored files over it.**
 - **Reach a folder outside the repo by absolute path, never by `cd`: the session's working folder moves with it.**
+
+## Issues 303 to 305 (the map at /merge, every FAIL line, the upgrade schedule)
+
+- **Keep issue and release numbers out of the always-read rule files; the changelog holds that history.**
+- **A step that builds from the working tree first checks that the tree is on the branch its output describes.**
