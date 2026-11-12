@@ -457,7 +457,7 @@
 
 ## Issues 257, 258 and 259 (nothing lost, nothing unread)
 
-- **Make the before run each step's first command, before opening its files, even in a research step.**
+- **Take each step's before run right after writing its target, before any of its work, even in a research step.**
 - **A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.**
 - **When a prompt adds a temporary worktree, give it the copy-and-install line its other worktrees get.**
 - **A prompt's example is read as the rule: use one any project produces, or say what in it is repo-specific.**
@@ -551,3 +551,8 @@
 - **Once you read a held-out set's misses to fix against them, it is no longer held out: the first score is the measure.**
 - **An exclusion list of bare words also drops true matches that use them; exclude the nearby problem's own phrases.**
 - **A guard that reads a file its own step creates has no before state: aim it at a file that exists, or make it a target.**
+
+## Issue 290 (catch a skipped before check at its step)
+
+- **Moving scratch work to one fixed folder needs a look-there-first rule, or a retry copies restored files over it.**
+- **Reach a folder outside the repo by absolute path, never by `cd`: the session's working folder moves with it.**

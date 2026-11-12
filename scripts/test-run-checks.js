@@ -1551,6 +1551,352 @@ section('17. a target that already meets its after expect fails the before run (
   check('the tally leaves a step whose target already passed unproved', s1.status === 'unproved' && /did not show its stated failure before/.test(String(s1.reasons)), one(JSON.stringify(s1)));
 });
 
+// --- 290. an after run its before record cannot prove is refused (issue #290) -
+// A step's before run could be skipped with nothing noticing until the tally
+// at the hand-off to review, when the step's work was committed and the step
+// could never be proved. An after run now reads the step's before record first,
+// the way the tally reads it, and refuses (exit 1, nothing run) when that record
+// cannot prove the step, keeping one record of the miss beside the step's
+// records, so the slip is caught at the step while its work is uncommitted.
+// Each case uses a plan and a file of its own, and every detail is one line.
+section('290 refuse: an after run its before record cannot prove is refused (issue #290)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const stepDir = (base) => path.join(proj, 'reports', 'checks', base, 'step-1');
+  const recFile = (base, phase) => path.join(stepDir(base), phase, 'results.json');
+  const missFile = (base) => path.join(stepDir(base), 'missed.json');
+  const bytes = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch (e) { return null; } };
+  const json = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+  const firstStep = (r) => (r.json && Array.isArray(r.json.steps) ? r.json.steps : []).find((s) => String(s.step) === '1') || {};
+  // One plan per case, its step 1 carrying the check lines given; returns the
+  // arguments for that step's phase runs.
+  const planWith = (base, lines) => {
+    write('plans/' + base + '.md', ['## Tasks', '', '- [ ] 🟥 **Step 1: Case** `[sequential]`'].concat(lines).concat(['']).join('\n'));
+    return ['--plan', 'plans/' + base + '.md', '--step', '1'];
+  };
+  // A target that counts one line the step adds to its own file: 1 before, 2 after.
+  const target = (file) => '  - Check target `n`: `grep -c one ' + file + '` - before `{"match": "^1$"}` - after `{"match": "^2$"}`';
+
+  // No before record: the step's work was done first.
+  write('r290a.txt', 'one\none\n');
+  const pa = planWith('PLAN-r290a', [target('r290a.txt')]);
+  const ra = run(pa.concat(['--phase', 'after']));
+  check('290 refuse: an after run with no before record exits 1 and runs nothing',
+    ra.status === 1 && ra.json === null && ra.stderr.trim().split('\n').length === 1 && /no before record/.test(ra.stderr)
+      && ra.stderr.indexOf(path.join('PLAN-r290a', 'step-1', 'before', 'results.json')) !== -1 && !fs.existsSync(path.join(stepDir('PLAN-r290a'), 'after')),
+    one(ra.stdout + ra.stderr));
+
+  // A target that did not show its stated failure before: its output already
+  // met the after expect (section 17's case), and the work went ahead anyway.
+  write('r290b.txt', 'one\n');
+  const pb = planWith('PLAN-r290b', ['  - Check target `loose`: `grep -c one r290b.txt` - before `{"match": "^[0-9]"}` - after `{"match": "^1$"}`']);
+  run(pb.concat(['--phase', 'before']));
+  const rb = run(pb.concat(['--phase', 'after']));
+  check('290 refuse: a target that did not show its stated failure refuses the after run',
+    rb.status === 1 && /did not show its stated failure before/.test(rb.stderr) && !fs.existsSync(path.join(stepDir('PLAN-r290b'), 'after')),
+    one(rb.stdout + rb.stderr));
+
+  // A check line edited after its before run: the record no longer stands for it.
+  write('r290c.txt', 'one\n');
+  write('r290c2.txt', 'one\n');
+  const pc = planWith('PLAN-r290c', [target('r290c.txt')]);
+  run(pc.concat(['--phase', 'before']));
+  planWith('PLAN-r290c', [target('r290c2.txt')]);
+  write('r290c2.txt', 'one\none\n');
+  const rc = run(pc.concat(['--phase', 'after']));
+  check('290 refuse: a row whose command changed since the before run refuses the after run',
+    rc.status === 1 && /different command/.test(rc.stderr),
+    one(rc.stdout + rc.stderr));
+
+  // A refactor: guards only, and no before record.
+  write('g290d.txt', 'keep\n');
+  const pd = planWith('PLAN-r290d', ['  - Check: no target - a refactor', '  - Check guard `w`: `grep -c keep g290d.txt` - `{"match": "^1$"}`']);
+  const rd = run(pd.concat(['--phase', 'after']));
+  check('290 refuse: a guard-only step with no before record is refused',
+    rd.status === 1 && /no before record/.test(rd.stderr) && !fs.existsSync(path.join(stepDir('PLAN-r290d'), 'after')),
+    one(rd.stdout + rd.stderr));
+
+  // A step proved once whose before record then stops proving it: the refusal
+  // leaves both records byte for byte, and a second refusal keeps the first
+  // miss record.
+  write('r290e.txt', 'one\n');
+  const pe = planWith('PLAN-r290e', [target('r290e.txt')]);
+  run(pe.concat(['--phase', 'before']));
+  write('r290e.txt', 'one\none\n');
+  run(pe.concat(['--phase', 'after']));
+  const eb = json(recFile('PLAN-r290e', 'before'));
+  if (eb) {
+    eb.checks = eb.checks.map((c) => Object.assign({}, c, { verdict: 'fail' }));
+    fs.writeFileSync(recFile('PLAN-r290e', 'before'), JSON.stringify(eb) + '\n');
+  }
+  const beforeBytes = bytes(recFile('PLAN-r290e', 'before'));
+  const afterBytes = bytes(recFile('PLAN-r290e', 'after'));
+  const re1 = run(pe.concat(['--phase', 'after']));
+  const firstMiss = bytes(missFile('PLAN-r290e'));
+  const re2 = run(pe.concat(['--phase', 'after']));
+  const miss = json(missFile('PLAN-r290e'));
+  check('290 refuse: the refusal keeps a miss record and leaves the before and after folders as they were',
+    re1.status === 1 && re2.status === 1 && !!eb && !!afterBytes
+      && bytes(recFile('PLAN-r290e', 'before')) === beforeBytes && bytes(recFile('PLAN-r290e', 'after')) === afterBytes
+      && !!miss && miss.plan === 'plans/PLAN-r290e.md' && String(miss.step) === '1' && !isNaN(Date.parse(miss.at))
+      && Array.isArray(miss.reasons) && miss.reasons.some((x) => /did not show its stated failure before/.test(x))
+      && firstMiss !== null && bytes(missFile('PLAN-r290e')) === firstMiss,
+    one(re1.stderr + ' ' + JSON.stringify(miss)));
+
+  // A no-target step with no guard has nothing to prove before or after. A run
+  // with no checks saves no record, so the printed object shows it ran.
+  const pf = planWith('PLAN-r290f', ['  - Check: no target - docs only']);
+  const rf = run(pf.concat(['--phase', 'after']));
+  check('290 refuse: a no-target step with no guard runs its after phase as before',
+    rf.status === 0 && !!rf.json && rf.json.phase === 'after' && Array.isArray(rf.json.checks) && rf.json.checks.length === 0 && !fs.existsSync(missFile('PLAN-r290f')),
+    one(rf.stdout + rf.stderr));
+
+  // A guard already failing before the work is carried, not refused.
+  write('r290g.txt', 'one\n');
+  write('g290g.txt', 'nope\n');
+  const pg = planWith('PLAN-r290g', [target('r290g.txt'), '  - Check guard `w`: `grep -c keep g290g.txt` - `{"match": "^1$"}`']);
+  run(pg.concat(['--phase', 'before']));
+  write('r290g.txt', 'one\none\n');
+  const rg = run(pg.concat(['--phase', 'after']));
+  check('290 refuse: a guard that failed before does not refuse the after run',
+    rg.status === 0 && !!rg.byId.n && rg.byId.n.verdict === 'pass' && !!json(recFile('PLAN-r290g', 'after')) && !fs.existsSync(missFile('PLAN-r290g')),
+    one(rg.stdout + rg.stderr));
+
+  // A before record an older runner wrote (no command on its rows) is matched
+  // by id, as the tally matches it.
+  write('r290h.txt', 'one\n');
+  const ph = planWith('PLAN-r290h', [target('r290h.txt')]);
+  run(ph.concat(['--phase', 'before']));
+  const hb = json(recFile('PLAN-r290h', 'before'));
+  if (hb) {
+    hb.checks = hb.checks.map((c) => { const o = Object.assign({}, c); delete o.check; delete o.expect; return o; });
+    fs.writeFileSync(recFile('PLAN-r290h', 'before'), JSON.stringify(hb) + '\n');
+  }
+  write('r290h.txt', 'one\none\n');
+  const rh = run(ph.concat(['--phase', 'after']));
+  check('290 refuse: an older before record with no command recorded is matched by id',
+    !!hb && rh.status === 0 && !!rh.byId.n && rh.byId.n.verdict === 'pass' && !fs.existsSync(missFile('PLAN-r290h')),
+    one(rh.stdout + rh.stderr));
+
+  // The refusal and the tally read a before record through one judgment, so
+  // every refused step is unproved in the tally for the reason the refusal gave.
+  const refused = [['PLAN-r290a', ra, /no before record/], ['PLAN-r290b', rb, /did not show its stated failure before/],
+    ['PLAN-r290c', rc, /different command/], ['PLAN-r290d', rd, /no before record/], ['PLAN-r290e', re1, /did not show its stated failure before/]];
+  const agree = refused.map(([base, r, why]) => {
+    const t = firstStep(run(['--plan', 'plans/' + base + '.md', '--tally']));
+    return { base, refused: r.status === 1 && why.test(r.stderr), tally: t.status === 'unproved' && why.test(String(t.reasons)) };
+  });
+  check('290 refuse: every refused step is unproved in the tally for the same before reason',
+    agree.every((a) => a.refused && a.tally),
+    one(JSON.stringify(agree)));
+});
+
+// --- 290. the owner's yes, and the count of misses and repairs (issue #290) ---
+// A refused after run is repaired at the step when the session can put the
+// work aside; when it cannot, the owner decides, and --owner-accepts records
+// their words on the after run while the step stays unproved. The tally counts
+// each miss and each miss a later before run repaired. The last case walks the
+// whole repair through the real runner and the sandbox's git.
+section("290 accept: the owner's yes, and the count of misses and repairs (issue #290)", function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const stepDir = (base) => path.join(proj, 'reports', 'checks', base, 'step-1');
+  const json = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+  const firstStep = (r) => (r.json && Array.isArray(r.json.steps) ? r.json.steps : []).find((s) => String(s.step) === '1') || {};
+  const planWith = (base, lines) => {
+    write('plans/' + base + '.md', ['## Tasks', '', '- [ ] 🟥 **Step 1: Case** `[sequential]`'].concat(lines).concat(['']).join('\n'));
+    return ['--plan', 'plans/' + base + '.md', '--step', '1'];
+  };
+  const target = (file) => '  - Check target `n`: `grep -c one ' + file + '` - before `{"match": "^1$"}` - after `{"match": "^2$"}`';
+
+  // The owner accepts a step whose before run was skipped.
+  const words = 'keep it, the build was done in the design tool';
+  write('a290a.txt', 'one\none\n');
+  const pa = planWith('PLAN-a290a', [target('a290a.txt')]);
+  const aa = run(pa.concat(['--phase', 'after', '--owner-accepts', words]));
+  const aRec = json(path.join(stepDir('PLAN-a290a'), 'after', 'results.json'));
+  check("290 accept: owner-accepts runs a refused after phase and records the owner's words",
+    aa.status === 0 && !!aa.byId.n && aa.byId.n.verdict === 'pass' && !!aRec && aRec.ownerAccepts === words && !!json(path.join(stepDir('PLAN-a290a'), 'missed.json')),
+    one(aa.stdout + aa.stderr));
+
+  // The flag is for a refused step only, with words, on an after run.
+  write('a290b.txt', 'one\n');
+  const pb = planWith('PLAN-a290b', [target('a290b.txt')]);
+  run(pb.concat(['--phase', 'before']));
+  write('a290b.txt', 'one\none\n');
+  const ab = run(pb.concat(['--phase', 'after', '--owner-accepts', 'not needed']));
+  const noWords = run(pa.concat(['--phase', 'after', '--owner-accepts', '  ']));
+  const onBefore = run(pb.concat(['--phase', 'before', '--owner-accepts', 'too soon']));
+  check('290 accept: owner-accepts on a step its before record proves exits 1',
+    ab.status === 1 && /proves it/.test(ab.stderr) && !fs.existsSync(path.join(stepDir('PLAN-a290b'), 'after'))
+      && noWords.status === 1 && /words/.test(noWords.stderr) && onBefore.status === 1 && /--phase after/.test(onBefore.stderr),
+    one([ab.stderr, noWords.stderr, onBefore.stderr].join(' | ')));
+
+  // The tally keeps the accepted step unproved and says what the owner said.
+  const ta = firstStep(run(['--plan', 'plans/PLAN-a290a.md', '--tally']));
+  check("290 accept: the tally keeps an accepted step unproved with the owner's words in its reasons",
+    ta.status === 'unproved' && String(ta.reasons).indexOf('the owner accepted it unproved at the step: ' + words) !== -1,
+    one(JSON.stringify(ta)));
+
+  // A miss repaired by a later before run: the work was done first, the after
+  // run refused, the work set aside, the before run taken, the work put back.
+  write('a290c.txt', 'one\none\n');
+  const pc = planWith('PLAN-a290c', [target('a290c.txt')]);
+  const missC = run(pc.concat(['--phase', 'after']));
+  write('a290c.txt', 'one\n');
+  run(pc.concat(['--phase', 'before']));
+  write('a290c.txt', 'one\none\n');
+  run(pc.concat(['--phase', 'after']));
+  const sc = firstStep(run(['--plan', 'plans/PLAN-a290c.md', '--tally']));
+  check('290 tally: a miss repaired by a later before run is proved and counted as repaired',
+    missC.status === 1 && sc.status === 'proved' && sc.repaired === true && typeof sc.missed === 'string' && !isNaN(Date.parse(sc.missed)),
+    one(JSON.stringify(sc)));
+
+  // Three steps: one missed and repaired, one missed and left, one in order.
+  write('plans/PLAN-a290d.md', ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: Repaired** `[sequential]`', target('a290d1.txt'), '',
+    '- [ ] 🟥 **Step 2: Missed** `[sequential]`', target('a290d2.txt'), '',
+    '- [ ] 🟥 **Step 3: In order** `[sequential]`', target('a290d3.txt'), ''].join('\n'));
+  const pd = (n, phase) => ['--plan', 'plans/PLAN-a290d.md', '--step', n, '--phase', phase];
+  write('a290d1.txt', 'one\none\n');
+  run(pd('1', 'after'));
+  write('a290d1.txt', 'one\n');
+  run(pd('1', 'before'));
+  write('a290d1.txt', 'one\none\n');
+  run(pd('1', 'after'));
+  write('a290d2.txt', 'one\none\n');
+  run(pd('2', 'after'));
+  write('a290d3.txt', 'one\n');
+  run(pd('3', 'before'));
+  write('a290d3.txt', 'one\none\n');
+  run(pd('3', 'after'));
+  const td = run(['--plan', 'plans/PLAN-a290d.md', '--tally']);
+  const sum = td.json && td.json.summary ? td.json.summary : {};
+  check('290 tally: the summary counts misses and repairs',
+    sum.missed === 2 && sum.repaired === 1 && sum.proved === 2 && sum.unproved === 1,
+    one(JSON.stringify(sum)));
+
+  // The whole repair through git: the step's work is uncommitted, so the file's
+  // last committed version is the state the before run should have seen.
+  write('a290e.txt', 'one\n');
+  git(['add', 'a290e.txt']);
+  git(['commit', '-qm', 'a290e base']);
+  const pe = planWith('PLAN-a290e', [target('a290e.txt')]);
+  write('a290e.txt', 'one\none\n');
+  const refusedE = run(pe.concat(['--phase', 'after']));
+  const aside = path.join(sandbox, 'aside-a290e.txt');
+  fs.copyFileSync(path.join(proj, 'a290e.txt'), aside);
+  git(['checkout', 'HEAD', '--', 'a290e.txt']);
+  const beforeE = run(pe.concat(['--phase', 'before']));
+  fs.copyFileSync(aside, path.join(proj, 'a290e.txt'));
+  const same = fs.readFileSync(aside, 'utf8') === read('a290e.txt');
+  const afterE = run(pe.concat(['--phase', 'after']));
+  const se = firstStep(run(['--plan', 'plans/PLAN-a290e.md', '--tally']));
+  check('290 repair: setting the work aside, the before run, the work back and the after run prove the step',
+    refusedE.status === 1 && beforeE.status === 0 && (beforeE.byId.n || {}).verdict === 'pass' && same
+      && afterE.status === 0 && (afterE.byId.n || {}).verdict === 'pass' && se.status === 'proved' && se.repaired === true,
+    one(JSON.stringify(se) + ' ' + refusedE.stderr));
+
+  // The miss record's own guards (review of #290). A link where the step's
+  // folder should be stops the record before anything is written through it.
+  const elsewhere = path.join(sandbox, 'elsewhere-a290f');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  fs.mkdirSync(path.join(proj, 'reports', 'checks', 'PLAN-a290f'), { recursive: true });
+  try { fs.symlinkSync(elsewhere, stepDir('PLAN-a290f')); } catch (e) { /* exists */ }
+  write('a290f.txt', 'one\none\n');
+  const linked = run(planWith('PLAN-a290f', [target('a290f.txt')]).concat(['--phase', 'after']));
+  check('290 miss record: a link at the step folder is refused and nothing is written through it',
+    linked.status === 1 && /The miss was not recorded: \S+ is a link or not a folder/.test(linked.stderr) && fs.readdirSync(elsewhere).length === 0,
+    one(linked.stderr));
+  // The tally reads nothing through that link either: a miss file planted on
+  // its far side is never counted, and the link is named in the step's notes.
+  fs.writeFileSync(path.join(elsewhere, 'missed.json'), JSON.stringify({ plan: 'plans/PLAN-a290f.md', step: '1', at: new Date().toISOString() }));
+  const linkedTally = firstStep(run(['--plan', 'plans/PLAN-a290f.md', '--tally']));
+  check('290 miss record: the tally names a link at the step folder and counts no miss through it',
+    linkedTally.missed === undefined && (linkedTally.notes || []).some((n) => /^the miss record cannot count: \S+ is a link or not a folder$/.test(n)),
+    one(JSON.stringify(linkedTally)));
+
+  // A miss file the runner did not write for this step is named in the tally's
+  // notes and never counted: bad JSON, no valid time, another plan, a link.
+  write('a290g.txt', 'one\n');
+  const pg = planWith('PLAN-a290g', [target('a290g.txt')]);
+  run(pg.concat(['--phase', 'before']));
+  write('a290g.txt', 'one\none\n');
+  run(pg.concat(['--phase', 'after']));
+  const missFile = path.join(stepDir('PLAN-a290g'), 'missed.json');
+  const tallyG = () => firstStep(run(['--plan', 'plans/PLAN-a290g.md', '--tally']));
+  const withMiss = (text) => { fs.rmSync(missFile, { force: true }); fs.writeFileSync(missFile, text); return tallyG(); };
+  const badJson = withMiss('{"plan": ');
+  const noTime = withMiss(JSON.stringify({ plan: 'plans/PLAN-a290g.md', step: '1', at: 'never' }));
+  const otherPlan = withMiss(JSON.stringify({ plan: 'plans/PLAN-other.md', step: '1', at: new Date().toISOString() }));
+  fs.rmSync(missFile, { force: true });
+  fs.writeFileSync(path.join(sandbox, 'miss-a290g.json'), JSON.stringify({ plan: 'plans/PLAN-a290g.md', step: '1', at: new Date().toISOString() }));
+  fs.symlinkSync(path.join(sandbox, 'miss-a290g.json'), missFile);
+  const viaLink = tallyG();
+  const uncounted = (s, why) => s.status === 'proved' && s.missed === undefined && s.repaired === undefined
+    && (s.notes || []).indexOf('the miss record cannot count: ' + why) !== -1;
+  check("290 miss record: a miss file that is not the runner's own is named in the tally's notes and never counted",
+    uncounted(badJson, 'missed.json is not valid JSON') && uncounted(noTime, 'missed.json has no valid time (at)')
+      && uncounted(otherPlan, 'missed.json was written for another plan or step') && uncounted(viaLink, 'missed.json is a link or not a file'),
+    one(JSON.stringify([badJson, noTime, otherPlan, viaLink])));
+});
+
+// --- 290. a green after run names the next step's before command (issue #290)
+// Both of this repo's skipped before runs began right after a step's checkpoint,
+// so a green after run prints `next`: the next step in plan order that has a
+// target or a guard, and the exact command for its before run, naming the
+// runner by the path it was run from. results.json never carries it: it is a
+// pointer for the session, not evidence.
+section('290 next: a green after run names the next step\'s before command (issue #290)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const json = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+  const target = (file) => '  - Check target `n`: `grep -c one ' + file + '` - before `{"match": "^1$"}` - after `{"match": "^2$"}`';
+  write('plans/PLAN-n290.md', ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: First** `[sequential]`', target('n290a.txt'), '',
+    '- [ ] 🟥 **Step 2: Notes** `[sequential]`', '  - Check: no target - docs only', '',
+    '- [ ] 🟥 **Step 3: Third** `[sequential]`', target('n290c.txt'), ''].join('\n'));
+  const np = (n, phase) => ['--plan', 'plans/PLAN-n290.md', '--step', n, '--phase', phase, '--timeout', '600000'];
+  write('n290a.txt', 'one\n');
+  run(np('1', 'before'));
+  write('n290a.txt', 'one\none\n');
+  const a1 = run(np('1', 'after'));
+  const nx = a1.json && a1.json.next ? a1.json.next : {};
+  const saved = json(path.join(proj, 'reports', 'checks', 'PLAN-n290', 'step-1', 'after', 'results.json'));
+  // A guard already failing before the work does not keep a run from green.
+  write('plans/PLAN-n290b.md', ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: Broken guard** `[sequential]`', target('n290b.txt'), '  - Check guard `w`: `grep -c keep n290w.txt` - `{"match": "^1$"}`', '',
+    '- [ ] 🟥 **Step 2: After it** `[sequential]`', target('n290b2.txt'), ''].join('\n'));
+  write('n290b.txt', 'one\n');
+  write('n290w.txt', 'nope\n');
+  run(['--plan', 'plans/PLAN-n290b.md', '--step', '1', '--phase', 'before']);
+  write('n290b.txt', 'one\none\n');
+  const b1 = run(['--plan', 'plans/PLAN-n290b.md', '--step', '1', '--phase', 'after']);
+  check('290 next: a green after run names the next step with checks and its before command',
+    a1.status === 0 && nx.step === '3' && nx.name === 'Third' && / --plan plans\/PLAN-n290\.md --step 3 --phase before /.test(String(nx.command))
+      && !!saved && saved.next === undefined && b1.status === 0 && !!b1.json && !!b1.json.next && b1.json.next.step === '2',
+    one(a1.stdout + ' | ' + b1.stdout + b1.stderr));
+
+  write('n290c.txt', 'one\n');
+  run(np('3', 'before'));
+  write('n290c.txt', 'one\none\n');
+  const a3 = run(np('3', 'after'));
+  check('290 next: the last step with checks prints no next',
+    a3.status === 0 && !!a3.json && (a3.byId.n || {}).verdict === 'pass' && a3.json.next === undefined,
+    one(a3.stdout + a3.stderr));
+
+  write('plans/PLAN-n290d.md', ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: No work** `[sequential]`', target('n290d.txt'), '',
+    '- [ ] 🟥 **Step 2: Later** `[sequential]`', target('n290d2.txt'), ''].join('\n'));
+  write('n290d.txt', 'one\n');
+  run(['--plan', 'plans/PLAN-n290d.md', '--step', '1', '--phase', 'before']);
+  const d1 = run(['--plan', 'plans/PLAN-n290d.md', '--step', '1', '--phase', 'after']);
+  check('290 next: an after run that is not green prints no next',
+    d1.status === 0 && !!d1.json && (d1.byId.n || {}).verdict === 'fail' && d1.json.next === undefined,
+    one(d1.stdout + d1.stderr));
+
+  check('290 next: the command names the runner by the path it was run from',
+    /^node /.test(String(nx.command)) && String(nx.command).indexOf(SCRIPT) !== -1 && / --timeout 600000$/.test(String(nx.command)),
+    one(JSON.stringify(nx)));
+});
+
 // --- 248. the full test step's history (issue #248) ---------------------------
 // A full test run used to keep its time only in the folder it wrote, so a suite
 // that doubled in five days raised nothing. A --full run appends one row to the

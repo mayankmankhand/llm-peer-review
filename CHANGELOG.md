@@ -2,6 +2,30 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+<!-- At release: re-record the prompt-load baseline (commands/execute.md grew 465 words and skills/loop-rules/SKILL.md 168 with the approved edits, the review's four included). -->
+
+**A skipped check before a plan step's work is now caught at that step, while the work is not yet committed, and `/tk:execute` repairs it there by itself (#290).** Before, nothing noticed until the hand-off to `/tk:review` at the end of the build, when the step was already committed and could never be proved.
+
+### Fixed
+
+- **`/tk:execute`: a skipped before check.** Each plan step runs its check twice: before the work, where it must fail the way the plan said, and after, where it must pass. When the before run was skipped, or came after the work, the after run now refuses before running anything, names the reason, and keeps a record of the miss. `/tk:execute` repairs the step right there: it sets the step's work aside (never with `git stash`, whose stack every side copy of a repo shares), takes the before run, puts the work back checked byte for byte, and takes the after run. Each repair counts against the step's 3 fix attempts. You are asked only when a check reads something that cannot be set aside, such as a live service: redo the step, or leave it unproved, in which case your words are saved with the step's checks and the hand-off to `/tk:review` stops at the end of the build, as it does for any unproved step. The tally at the end of the build now counts the misses and how many were repaired.
+
+### Added
+
+- **The next step's before command.** When a step's after run passes, the checks runner now names the exact command for the next step's before run, so the session starts the next step with its check rather than its work.
+
+### Upgrading
+
+- Everything arrives with the plugin update, with no setup step, no new permission rows and no new upgrade checks.
+- A command of your own that runs a step's after check (`run-checks.js --plan <plan> --step <N> --phase after`) now meets the same refusal when that step has no before run that proves it. Run the step's before check before its work, as `/tk:execute` does.
+- A copy-install for other editors gets the changed `/execute` command, loop rules and checks runner when you re-run `setup.sh` or `setup.ps1`.
+
+### Why
+
+In this repository's own builds, one before check was skipped in 236 steps with saved checks, and the miss surfaced only at the hand-off, after its step was committed and could no longer be proved. The issue also proposed marking a step in progress when its before check runs; that was dropped on measurement, because across 205 steps the mark came before the check in 70, after it in 45 and never in 90, and the session that slipped made none.
+
 ## v8.0.19 - Fewer Stops, Fairer Rechecks (2026-11-10)
 
 **A review no longer undoes a correct fix just because the fix kept the words its check searched for, you can allow one more try at a fix, and planning and reviews no longer stop to ask for your approval at two of the toolkit's own checks (#288, #294, #295, #296, #297, #298).** A failed recheck of a file search now goes to a fresh verifier, which reads the change itself and decides, without spending a fix try. `/tk:merge` keeps one Unreleased heading in the changelog when several branches land after a release. Two maintainer tools are fixed as well (#292, #299).
