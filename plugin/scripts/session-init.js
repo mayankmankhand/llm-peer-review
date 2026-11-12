@@ -1722,6 +1722,47 @@ function readToolkitLeads() {
 function leadKey(lead) { return String(lead).toLowerCase().replace(/\s+/g, " ").trim().replace(/[.:!]+$/, "").trim(); }
 
 // ==========================================================================
+// --must-check <plan file>: a plan's must-check list, for /review (#302)
+// ==========================================================================
+//
+// /review seeds one finding from each line of a plan's `## Must-check for
+// review` section (M14). It listed the section with a sed command whose quoted
+// script stopped every default-mode session for approval; this mode prints the
+// same lines from a script the permission rows already allow. The heading is
+// matched as that sed matched it, as any line starting `## Must-check for
+// review` (the plan template's heading carries a parenthetical after it), and
+// the section runs to the next `## ` line, as sectionBody reads one. Every line
+// in between is printed verbatim, blank lines, comments and indented lines
+// included, as sed printed them; only the first such section is read. Like the
+// other modes outside --chain it fails soft: a bad call, a missing file or a
+// path outside the project is an error field, and the exit code stays 0.
+//   {"mustCheck": {"plan": "...", "found": true | false, "lines": ["..."]}}
+//   {"mustCheck": {"plan": "...", "error": "usage" | "not_found" | "outside_project", "detail": "..."}}
+const MUST_CHECK_HEADING = /^## Must-check for review/;
+function mustCheck(args) {
+  const plan = args.length === 1 ? String(args[0]) : "";
+  if (!plan || plan.startsWith("--")) return { mustCheck: { plan: plan || null, error: "usage", detail: "usage: session-init.js --must-check <plan file>" } };
+  // Containment by real path, never by the text of the path: a link inside the
+  // project that points out of it is outside too.
+  const root = modelsRoot() || cwd;
+  let rootReal = root;
+  try { rootReal = fs.realpathSync(root); } catch { /* keep the path git printed */ }
+  let real;
+  try { real = fs.realpathSync(path.resolve(cwd, plan)); } catch { return { mustCheck: { plan, error: "not_found", detail: plan + " does not exist" } }; }
+  if (real !== rootReal && !real.startsWith(rootReal + path.sep)) return { mustCheck: { plan, error: "outside_project", detail: plan + " is outside the project at " + root } };
+  let text;
+  try { text = fs.readFileSync(real, "utf8"); } catch (e) { return { mustCheck: { plan, error: "not_found", detail: plan + " could not be read: " + e.message } }; }
+  const all = text.split(/\r?\n/);
+  // A file's closing newline ends its last line; it does not add an empty one.
+  if (all.length && all[all.length - 1] === "") all.pop();
+  const start = all.findIndex((l) => MUST_CHECK_HEADING.test(l));
+  if (start === -1) return { mustCheck: { plan, found: false, lines: [] } };
+  const lines = [];
+  for (let i = start + 1; i < all.length && !/^## /.test(all[i]); i++) lines.push(all[i]);
+  return { mustCheck: { plan, found: true, lines } };
+}
+
+// ==========================================================================
 // --chain <stage>: the countable part of M14's stage handoffs (#272)
 // ==========================================================================
 //
@@ -2036,6 +2077,8 @@ if (outGiven && cliArgs[0] !== "--scope") {
   // because a shell must never read a refusal as a pass.
   if (result.error) process.exitCode = 1;
   emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, result, { cwd })), (o) => ordered(o, ["generatedAt", "stage", "error", "detail", "pass", "failed", "handoff", "notes"]));
+} else if (cliArgs[0] === "--must-check") {
+  emit(Object.assign({ generatedAt: new Date().toISOString() }, mustCheck(cliArgs.slice(1)), { cwd }), (o) => ordered(o, ["generatedAt", "mustCheck"]));
 } else if (cliArgs[0] === "--scope") {
   let result;
   try {
@@ -2053,5 +2096,5 @@ if (outGiven && cliArgs[0] !== "--scope") {
     else emit(Object.assign(withoutLists(full), { savedTo: saved.savedTo }), (o) => ordered(o, ["generatedAt", "error", "scopeLine", "savedTo"]));
   }
 } else {
-  emit({ generatedAt: new Date().toISOString(), error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>], --models, --cycle-start, --lessons or --chain <stage>, each with an optional --mode <best|fit|cheap>)", cwd });
+  emit({ generatedAt: new Date().toISOString(), error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>], --models, --cycle-start, --lessons, --must-check <plan file> or --chain <stage>, each with an optional --mode <best|fit|cheap>)", cwd });
 }

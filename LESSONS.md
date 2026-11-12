@@ -396,7 +396,6 @@
 
 - **Never share a standing page that closes findings by file between branches.**
 - **Run a reviewer's suggested fix in a scratch case before applying it.**
-- **After adding a lesson lead, rebuild `seed/toolkit-lesson-leads.txt` with `scripts/seed-history.js`.**
 
 ## Issue 241 (check a claim at its source)
 
@@ -457,7 +456,7 @@
 
 ## Issues 257, 258 and 259 (nothing lost, nothing unread)
 
-- **Make the before run each step's first command, before opening its files, even in a research step.**
+- **Take each step's before run right after writing its target, before any of its work, even in a research step.**
 - **A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.**
 - **When a prompt adds a temporary worktree, give it the copy-and-install line its other worktrees get.**
 - **A prompt's example is read as the rule: use one any project produces, or say what in it is repo-specific.**
@@ -556,3 +555,12 @@
 
 - **No character filter makes a name safe to print into text a model reads: print no name, or a fixed phrase.**
 - **`git worktree list` names the main copy first only when that entry holds a `.git`; test it before sending anyone there.**
+
+## Issues 301 and 302 (release gaps)
+
+- **In a numbered step, put an explanation after the step's last action, never between two actions.**
+
+## Issue 290 (catch a skipped before check at its step)
+
+- **Moving scratch work to one fixed folder needs a look-there-first rule, or a retry copies restored files over it.**
+- **Reach a folder outside the repo by absolute path, never by `cd`: the session's working folder moves with it.**

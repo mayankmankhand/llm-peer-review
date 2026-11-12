@@ -1915,6 +1915,59 @@ section('--lessons lists trim candidates (#281)', function () {
     JSON.stringify({ plugin: P.candidates, pluginNotes: P.notes, ownNotes: own.notes, stderr: (r.stderr || '').slice(0, 200) }));
 });
 
+// #302 item 1: /review listed a plan's must-check section with a sed command
+// whose quoted script stopped every default-mode session for approval. This
+// mode prints the same lines. The expected lines are pinned as literals: what
+// the old `sed -n '/^## Must-check for review/,/^## /p'` printed, less the
+// heading and the next heading.
+section('--must-check <plan>: the plan\'s must-check list for /review (#302)', function () {
+  const repo = newRepo('must-check');
+  // The template's heading carries a parenthetical; the section holds a
+  // comment, an indented sub-bullet, a wrapped line and a ### line, and ends
+  // at the next ## heading, after a blank line the old read printed too.
+  write(repo, 'plans/PLAN-mid.md', [
+    '# Plan', '', '## Tasks', '- [ ] Step 1', '',
+    '## Must-check for review (optional - only when a judge left gaps open)',
+    '<!-- One line per item -->',
+    '- [plan] Risk: first gap',
+    '  - an indented sub-bullet',
+    'continuing a wrapped line',
+    '### a sub heading inside the section',
+    '- [check] c1 (step 1): flaky - npm test - record: reports/x/results.json',
+    '',
+    '## Outcomes', 'done', '',
+  ].join('\n'));
+  write(repo, 'plans/PLAN-last.md', ['# Plan', '', '## Must-check for review', '- [plan] Step: the last gap', ''].join('\n'));
+  write(repo, 'plans/PLAN-none.md', ['# Plan', '', '## Tasks', '- [ ] Step 1', ''].join('\n'));
+  const mid = runScript(['--must-check', 'plans/PLAN-mid.md'], repo).json.mustCheck || {};
+  const last = runScript(['--must-check', 'plans/PLAN-last.md'], repo).json.mustCheck || {};
+  check('must-check prints every line of the section verbatim, under the template heading too',
+    mid.found === true && mid.plan === 'plans/PLAN-mid.md' && JSON.stringify(mid.lines) === JSON.stringify([
+      '<!-- One line per item -->',
+      '- [plan] Risk: first gap',
+      '  - an indented sub-bullet',
+      'continuing a wrapped line',
+      '### a sub heading inside the section',
+      '- [check] c1 (step 1): flaky - npm test - record: reports/x/results.json',
+      '',
+    ]) && last.found === true && JSON.stringify(last.lines) === JSON.stringify(['- [plan] Step: the last gap']),
+    JSON.stringify({ mid, last }));
+  const none = runScript(['--must-check', 'plans/PLAN-none.md'], repo);
+  check('must-check reports found false for a plan with no section',
+    none.status === 0 && (none.json.mustCheck || {}).found === false && JSON.stringify(none.json.mustCheck.lines) === '[]' && !('error' in none.json.mustCheck),
+    JSON.stringify(none.json));
+  write(TMP, 'outside-plan.md', '## Must-check for review\n- [plan] Risk: outside\n');
+  const missing = runScript(['--must-check', 'plans/PLAN-gone.md'], repo);
+  const outside = runScript(['--must-check', '../outside-plan.md'], repo);
+  const bare = runScript(['--must-check'], repo);
+  check('must-check reports a missing file and a path outside the project in an error field',
+    missing.status === 0 && (missing.json.mustCheck || {}).error === 'not_found' && !('lines' in missing.json.mustCheck)
+      && outside.status === 0 && (outside.json.mustCheck || {}).error === 'outside_project' && !('lines' in outside.json.mustCheck)
+      && bare.status === 0 && (bare.json.mustCheck || {}).error === 'usage',
+    // One line: the gate keeps only a failing suite's last 15 lines (LESSONS, #250).
+    JSON.stringify([missing.json, outside.json, bare.json]));
+});
+
 if (failures.length === 0) {
   console.log(passed + ' checks passed.\n');
   process.exit(0);

@@ -1,5 +1,44 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.19, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.20, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.20 - Caught at the Step, Quieter Reviews (2026-11-11)
+
+**A skipped check before a plan step's work is now caught at that step, while the work is not yet committed, and `/tk:execute` repairs it there by itself. Reviews also no longer stop to ask at two of the toolkit's own steps (#290, #301, #302).** Before, nothing noticed a skipped before check until the hand-off to `/tk:review` at the end of the build, when the step was already committed and could never be proved. A review now reads a plan's must-check list (the open points a plan hands to its review) without asking, and a fix to a file git ignores gets its separate check. Two maintainer tools are fixed as well.
+
+### Added
+
+- **The next step's before command.** When a step's after run passes, the checks runner now names the exact command for the next step's before run, so the session starts the next step with its check rather than its work.
+
+### Fixed
+
+- **`/tk:execute`: a skipped before check (#290).** Each plan step runs its check twice: before the work, where it must fail the way the plan said, and after, where it must pass. When the before run was skipped, or came after the work, the after run now refuses before running anything, names the reason, and keeps a record of the miss. `/tk:execute` repairs the step right there: it sets the step's work aside (never with `git stash`, whose stack every side copy of a repo shares), takes the before run, puts the work back checked byte for byte, and takes the after run. Each repair counts against the step's 3 fix attempts. You are asked only when a check reads something that cannot be set aside, such as a live service: redo the step, or leave it unproved, in which case your words are saved with the step's checks and the hand-off to `/tk:review` stops at the end of the build, as it does for any unproved step. The tally at the end of the build now counts the misses and how many were repaired.
+- **Reviews: reading a plan's must-check list no longer stops for your approval (#302).** In default permission mode, every review that checks a plan stopped to ask before reading the plan's must-check list, because the read was a quoted text-search command. The review now reads the list through the toolkit's startup script (`session-init.js --must-check`), which your permission rows already allow, and gets the same lines: compared on 131 plans, every one matched.
+- **Reviews: a fix to a file git ignores now gets its separate check (#302).** When a finding's fix belonged in a file git does not track, such as a plan, the separate check of the fix saw no change and refused, so the review asked whether to accept the fix on its own check. That check now reads such a file whole when a finding cites it and it changed after the review started. A cited file outside your project, a link, a binary, the review's own output folder and the files the push tripwire never lets out (`.env`, `.env.local`, `.claude/settings.local.json` and the like) are never shown to it; each is listed with the reason.
+- **The starter lessons list carries the four lessons added since v8.0.19**, so `/tk:upgrade` recognizes them as the toolkit's own.
+- **Maintainer only: a new lesson no longer turns `npm test` red (#301).** An everyday test compared the starter lesson list with `LESSONS.md`, so the next full run after every new lesson failed, often on a branch that touched neither file. The release check now makes that comparison on release runs only, as a `lesson list` line that names the missing leads and the command that rebuilds the list (`node scripts/seed-history.js`, release step 1). Everyday runs print an `info lesson list` line and never fail on it.
+- **Maintainer only: the release check's own tests pass under the catch-rate override (#302).** A release run with `TK_RELEASE_CATCH_OVERRIDE` set passed the setting on to the gate's own test suite, where the five cases that expect the catch-rate check to fail saw it pass, so the gate failed its own suite. The suite now starts every gate it runs without the caller's `TK_RELEASE_` settings.
+
+### Upgrading
+
+- Everything arrives with the plugin update, with no setup step, no new permission rows and no new upgrade checks: the review's new call runs a script your existing rows already allow.
+- A command of your own that runs a step's after check (`run-checks.js --plan <plan> --step <N> --phase after`) now meets the same refusal when that step has no before run that proves it. Run the step's before check before its work, as `/tk:execute` does.
+- A copy-install for other editors gets the changed `/execute` and `/review` commands, loop rules and scripts when you re-run `setup.sh` or `setup.ps1`.
+
+### Why
+
+In this repository's own builds, one before check was skipped in 236 steps with saved checks, and the miss surfaced only at the hand-off, after its step was committed and could no longer be proved. The issue also proposed marking a step in progress when its before check runs; that was dropped on measurement, because across 205 steps the mark came before the check in 70, after it in 45 and never in 90, and the session that slipped made none.
+
+v8.0.19's notes named two toolkit steps that still asked in its default-mode practice run: the review's read of the must-check list, and a fix to the plan file that could not reach the separate check. A practice session on this build ran the old read and the new one side by side: the old read stopped for approval and the new one ran. A replay of the v8.0.19 case through the real separate checker read a real fix as fixed and an edit that left the problem as not fixed, and refused the untouched file.
+
+Maintainer only: the starter lesson list reaches no project before a release, and release step 1 rebuilds it, so checking it on every test run only turned runs red between releases. The lessons log recorded three such red runs before this change.
+
+Maintainer only: this release changes the review path, so its catch-rate check compares against v8.0.19's two Pocket runs, this time on the same Claude Code version (2.1.322). The verdict is PASS, with no override: all seven reliable catches were kept. One of them, the export-columns bug, was caught in 1 of 2 runs (2 of 2 before): in run 2 both findings on it carried a proof written backwards or against the wrong text, so the double-check could not test them, and the review summary lists them as untested. One miss in two runs counts as noise. The two that come and go were each caught in 2 of 2 runs (the browser bug 0 of 2 before, the README order finding 1 of 2 before).
+
+### Notes
+
+- Before this release, one full cycle ran in default permission mode on a throwaway project, with the same task as the v8.0.19 practice run. No toolkit step stopped for approval (one did in v8.0.19: the review's read of a plan's must-check list). The session was stopped five times on commands it wrote itself: a file-reading loop, a one-line script, two lookups for a browser and a piped test run.
+- In that run every plan step's check ran before and after its work, and each passing after run named the next step's before command. No before check was skipped, so the refusal and the repair did not fire.
+- That run did not exercise the two review fixes. The review took the plan's open points from the plan it had written earlier in the same session, without making the new read, and its fix to the plan file was confirmed by a file search, so the separate check never needed the file. The practice session and the replay named under Why are the evidence for those two.
 
 ## v8.0.19 - Fewer Stops, Fairer Rechecks (2026-11-10)
 
