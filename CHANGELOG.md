@@ -2,6 +2,35 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**`/tk:setup` and `/tk:upgrade` now stop with one plain line when they are started somewhere they cannot work, and the upgrade's two run-once checks reach the projects that never got them (#289, #291).**
+
+<!-- At release: re-record the prompt-load baseline (skills/upgrade/SKILL.md, skills/shared/conventions.md, skills/shared/toolkit-reference.md and commands/worktree.md grew with approved edits). No review prompt changed, so no catch-rate runs are owed. -->
+
+### Changed
+
+- **`/tk:worktree` copies your settings file into the new side copy.** `.claude/settings.local.json` holds the toolkit's permission rows, and git ignores it, so a new side copy started without it and Claude asked again there for what the main copy already allows. Setup used to be the way to write one there, and setup now runs in the main copy only. The command copies the file from the main copy when the side copy has none, and never overwrites one that is there.
+
+### Fixed
+
+- **`/tk:upgrade`: the two run-once checks reach every project.** Two of the upgrade's checks promise to run once per project: Claude Code's prompt audit of your own instruction files (C-13), and a question about how much text your own prompt files load up front (C-20). A project set up fresh on a check's version or later, or moved from a copy-install that new, never got it, because the upgrade only ran a check newer than the version the project was last audited at. Such a project now gets each one on its next upgrade, once. The upgrade's summary names them (`2 run-once check(s) owed [C-13, C-20]`), and its closing stamp records them in `.claude/.toolkit-state.json` as `onceDone`, so neither runs again and a finding you decline does not come back.
+- **`/tk:setup` and `/tk:upgrade`: a plain stop in a side copy.** Started in a side copy of a project (a git worktree), the upgrade ran from a copy that keeps its own record of the permission rows you declined and of the findings already ruled out, and that has none of the files git ignores. It asked again what you had settled and still marked the project as audited, and setup wrote a second settings file there. Both now stop with one line that names the main copy, and read and change nothing. The notices at the start of a session in a side copy, the version notice and the one about an old copy-install, send you to the main copy too. They print no folder path, because Claude reads those notices and a folder can be named anything. For the same reason the stop line prints a path only when it is made of plain path characters, and names any other folder by a fixed phrase.
+- **`/tk:setup` and `/tk:upgrade`: a plain stop for a project kept below the top of a bigger repository.** Both treat a repository's top folder as the project. With the toolkit's files in a subfolder, the upgrade read the top folder instead and found nothing of yours, and setup would have written a second install at the top. Both now stop with one line that names the two folders, and the install guide gives the two ways out. Setup stops the same way for an old copy-install kept in a subfolder, with or without its manifest. An earlier fix for the upgrade's earlier-notes offer in such a project had changed nothing (#291).
+
+### Upgrading
+
+- Everything arrives with the plugin update, with no setup step, no new permission rows and no new upgrade checks. Run `/tk:upgrade` in each project's main copy, at the top folder of its repository; [Where to run setup and the upgrade](docs/INSTALL.md#where-to-run-setup-and-the-upgrade) says what the stop line means.
+- A project that began on 7.5.0 or later gets Claude Code's prompt audit of its own instruction files on this upgrade, and one that began on 8.0.7 or later also gets the prompt-size question. The audit takes a few minutes, and every edit it proposes waits for your tick on the upgrade's approval page.
+- A project whose state file was never saved to git has no record of the version it began on, so it gets both checks once more, even if it had them before.
+- A copy-install for other editors is not affected: it has no `/tk:upgrade`, and its own installer is unchanged.
+
+### Why
+
+The upgrade decided what to run from one number, the version a project was last audited at. That works for a check about the toolkit's own text, and it fails for a check that promises one run per project, because a project that starts after the check arrived is never behind it. The run-once checks now have a record of their own.
+
+Every toolkit script takes a repository's top folder as the project, and some records are kept per working copy, outside git. Supporting a side copy or a subfolder would mean changing all of them, so setup and the upgrade now say where to run instead of running in the wrong place.
+
 ## v8.0.20 - Caught at the Step, Quieter Reviews (2026-11-11)
 
 **A skipped check before a plan step's work is now caught at that step, while the work is not yet committed, and `/tk:execute` repairs it there by itself. Reviews also no longer stop to ask at two of the toolkit's own steps (#290, #301, #302).** Before, nothing noticed a skipped before check until the hand-off to `/tk:review` at the end of the build, when the step was already committed and could never be proved. A review now reads a plan's must-check list (the open points a plan hands to its review) without asking, and a fix to a file git ignores gets its separate check. Two maintainer tools are fixed as well.

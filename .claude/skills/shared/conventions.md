@@ -2,7 +2,7 @@
 
 <!-- Parsed by scripts/upgrade-audit.js, the deterministic half of /tk:upgrade. Keep each entry in exactly the format under "Entry format": the parser reads the heading and the bold-labelled bullets and nothing else. Ids are permanent: never renumber, never reuse. -->
 
-A convention is a countable unit with one source. Each entry carries an id that never changes, the release it arrived in, what it applies to, how a file behind it is found, and the shape of the fix. `/tk:upgrade` reads this file, selects the entries whose `Since` lies in the range (last audited version, current plugin version], plus every entry marked `Runs: every upgrade`, runs each detector over the files the project owns (its own commands, skills, agents, and rules under `.claude/`, plus `CLAUDE.md`, and for C-11 the other files its sessions read; the plugin's files are never in the project), and turns every hit into a finding with a stable key and a runnable receipt. From there the normal loop applies: the M2 audit judges the findings, survivors are auto-fixed, every fix is re-verified by rerunning the audit (a finding is fixed when no finding in the rerun carries its key), and the run ends by stamping `.claude/.toolkit-state.json` so the next upgrade starts where this one stopped. The CHANGELOG's Upgrading section names, by id, the conventions each release adds.
+A convention is a countable unit with one source. Each entry carries an id that never changes, the release it arrived in, what it applies to, how a file behind it is found, and the shape of the fix. `/tk:upgrade` reads this file, selects the entries whose `Since` lies in the range (last audited version, current plugin version], plus every entry marked `Runs: every upgrade` and each entry marked `Runs: once` that the project is still owed, runs each detector over the files the project owns (its own commands, skills, agents, and rules under `.claude/`, plus `CLAUDE.md`, and for C-11 the other files its sessions read; the plugin's files are never in the project), and turns every hit into a finding with a stable key and a runnable receipt. From there the normal loop applies: the M2 audit judges the findings, survivors are auto-fixed, every fix is re-verified by rerunning the audit (a finding is fixed when no finding in the rerun carries its key), and the run ends by stamping `.claude/.toolkit-state.json` so the next upgrade starts where this one stopped. The CHANGELOG's Upgrading section names, by id, the conventions each release adds.
 
 A convention describes the toolkit's contract with a project's own files. It is not a style guide for the project's code, and it never fires on a file the toolkit ships.
 
@@ -12,6 +12,7 @@ A convention describes the toolkit's contract with a project's own files. It is 
 ### C-<n>: <title>
 - **Since:** <version the convention arrived in>
 - **Runs:** every upgrade   (optional; only on an entry that must be checked on every upgrade)
+- **Runs:** once   (optional, in place of the line above; only on an entry that promises one run per project)
 - **Scope:** prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | gitattributes | local-edits | review-kinds | toolkit-pastes
 - **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | lessons-merge | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | paste-size | manual
 - **Severity:** warn | suggest   (optional; a regex detector's findings default to warn)
@@ -24,6 +25,8 @@ A convention describes the toolkit's contract with a project's own files. It is 
 `regex` needs one or more `Looks behind` patterns; the other detectors carry their check in the script and take none. `manual` is the one detector the script does not run: the `/tk:upgrade` skill reads the files in scope itself, judges each against the `Looks behind` prose, and emits findings in the same shape with a file-read receipt. Use it only for a judgment no grep expresses.
 
 `Runs: every upgrade` takes an entry out of the version range: it is checked on every upgrade, whatever version the project was last audited at. Use it only for a check whose subject can fall behind on any release, such as the seeded rules text, which any release can change; an entry without the bullet runs only when its `Since` lies in the range.
+
+`Runs: once` marks an entry that promises one run per project, for a check that takes minutes or asks a question a second run would only repeat. It runs when its `Since` lies in the range, like any entry, and also when the project began at or after its `Since` and has not had it: a project set up fresh at that version or later, or migrated from a copy-install that new, never has the entry in a range. The state file keeps the entries a project has had in `onceDone`, which the stamp at the end of a clean `/tk:upgrade` writes, so an entry listed there is never run again, and a finding of it the user declined does not come back. A project that left no record of the version it began on gets the entry once more rather than never.
 
 A hit is a candidate, not a verdict. Every finding goes through the M2 audit before anything is fixed, and the audit is where a false positive dies: a path pattern that matched a file the project itself owns, a dispatch name that only looks like a toolkit agent. The receipt on each finding is the grep that found it, so a skeptic can refute it from the bytes.
 
@@ -145,12 +148,13 @@ Why: `.claude/toolkit/review-kinds.md` is how a project adds review kinds of its
 
 ### C-13: Instructions newer models no longer need
 - **Since:** 7.5.0
+- **Runs:** once
 - **Scope:** prompt-files+session-files
 - **Detector:** manual
 - **Looks behind:** `what Claude Code's bundled prompt audit flags in the project's own instruction files: verification rituals, emphasis boosters, mandatory procedures, stale examples, contradictory rules, dated config`
 - **Fix:** the edit the audit proposes, applied only after the batch page approves it; `/tk:upgrade` step 3b runs the audit that judges this entry
 
-Why: the other conventions follow what changed in the toolkit, and none can say which of the project's own instructions a newer model reads too literally. Claude Code ships an audit for that. This entry runs it once, on the upgrade that brings it, rather than on every upgrade: the audit takes minutes, and a finding the user declines would come back each time. `/claude-api prompt-audit` runs it again by hand.
+Why: the other conventions follow what changed in the toolkit, and none can say which of the project's own instructions a newer model reads too literally. Claude Code ships an audit for that. This entry runs it once per project rather than on every upgrade: the audit takes minutes, and a finding the user declines would come back each time. For a project that began before 7.5.0 that run was on the upgrade that brought the entry; a project that began on 7.5.0 or later gets it on its next upgrade. `/claude-api prompt-audit` runs it again by hand.
 
 ### C-14: Agents and helper calls follow the model routing rule
 - **Since:** 7.5.1
@@ -209,13 +213,14 @@ Why: the toolkit's stages paste seven files of the project's own from `.claude/t
 
 ### C-20: Rules load when their phase starts, and each prompt file holds a line
 - **Since:** 8.0.7
+- **Runs:** once
 - **Scope:** prompt-files+claude-md
 - **Detector:** manual
 - **Severity:** warn
 - **Looks behind:** `a file of the project's own that loads text a session needs only in a later phase, or never, ahead of time: a command or skill that pastes a long block used only at its end, or an always-on file (CLAUDE.md, .claude/rules/) carrying detail a session rarely reads, where the project, having measured it, judges the weight does not fit its workflow`
 - **Fix:** the project's own choice, applied only from the batch page: trim repetition, move a block a later phase needs into a skill loaded by name at that phase (the toolkit's `loop-rules`, `report-rules` and `review-page` pattern, two permission rows per skill), or keep the file as it is with one line saying why
 
-Why: this is what the toolkit did, why, and a question for this project. What it did: every `/review` loaded 23,019 words before reading a line of code, and eleven more files pasted the same rules; from 8.0.7 a review starts at about 8,300, loads the loop and the report template when its finders return, and loads the page rules only when a page renders, and the release gate fails when any one prompt file loads more than 11,000 words, so the cut cannot grow back unnoticed. Why: every model call re-reads everything loaded before it. In one measured run the orchestrator re-read its own rulebook on 74 of 75 calls, about 2.2 million of the 5 million cached tokens that run paid for, most of it rules for phases it had not reached. The question: measure this project's own prompt files and its always-on files (`wc -w` is enough; a project's own files paste no toolkit fragment) and judge whether the same split fits this workflow. If it does and a file is over the line this project chooses, raise one finding per file with the trim as its fix; if it does not fit, or nothing is over, raise nothing. No number is imposed: a line that fits a toolkit of twelve rule-pasting files fits few projects, and the project that measures its own files is the one that can judge. Runs once, on the upgrade that brings it.
+Why: this is what the toolkit did, why, and a question for this project. What it did: every `/review` loaded 23,019 words before reading a line of code, and eleven more files pasted the same rules; from 8.0.7 a review starts at about 8,300, loads the loop and the report template when its finders return, and loads the page rules only when a page renders, and the release gate fails when any one prompt file loads more than 11,000 words, so the cut cannot grow back unnoticed. Why: every model call re-reads everything loaded before it. In one measured run the orchestrator re-read its own rulebook on 74 of 75 calls, about 2.2 million of the 5 million cached tokens that run paid for, most of it rules for phases it had not reached. The question: measure this project's own prompt files and its always-on files (`wc -w` is enough; a project's own files paste no toolkit fragment) and judge whether the same split fits this workflow. If it does and a file is over the line this project chooses, raise one finding per file with the trim as its fix; if it does not fit, or nothing is over, raise nothing. No number is imposed: a line that fits a toolkit of twelve rule-pasting files fits few projects, and the project that measures its own files is the one that can judge. Runs once per project: on the upgrade that brought it, or, for a project that began on 8.0.7 or later, on its next upgrade.
 
 ### C-21: The re-verify round runs through the toolkit's mode
 - **Since:** 8.0.9

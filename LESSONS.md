@@ -551,6 +551,11 @@
 - **An exclusion list of bare words also drops true matches that use them; exclude the nearby problem's own phrases.**
 - **A guard that reads a file its own step creates has no before state: aim it at a file that exists, or make it a target.**
 
+## Issues 289 and 291 (run-once checks and the wrong-folder stop)
+
+- **No character filter makes a name safe to print into text a model reads: print no name, or a fixed phrase.**
+- **`git worktree list` names the main copy first only when that entry holds a `.git`; test it before sending anyone there.**
+
 ## Issues 301 and 302 (release gaps)
 
 - **In a numbered step, put an explanation after the step's last action, never between two actions.**

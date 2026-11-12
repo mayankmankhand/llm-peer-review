@@ -699,6 +699,67 @@ function marketplaceNamesToolkit(projectDir) {
   return plugins.some((p) => p && typeof p === 'object' && p.name === 'tk');
 }
 
+// >>> wrong folder stop (issue #291) >>>
+// Byte-identical in setup-project.js and upgrade-audit.js, from this marker to
+// the closing one (scripts/test-upgrade-audit.js compares the two). Setup and
+// the upgrade take the repository's top folder as the project, so there are
+// two places neither can work, and each script stops there before it reads or
+// writes anything:
+//   - a side copy (a git worktree). It keeps its own offered-rows and refuted
+//     records, and it lacks the files git ignores (the migration record, the
+//     backups, often the settings file), so a run there asks again what the
+//     main copy settled and skips what it cannot see. git's own answer decides:
+//     a folder's git directory differs from the repository's common one only in
+//     a linked worktree, never in a submodule or in a repository whose git
+//     directory sits elsewhere. The main copy is the first entry git lists,
+//     when that entry is a working folder (it holds a .git entry). A bare
+//     repository has none. For a repository whose git directory is kept apart
+//     from its working folder, git lists the git directory there and records
+//     the working folder nowhere, whether or not that folder still exists. In
+//     neither case is there a stop: there is nowhere to send the user.
+//   - a project kept below the top folder. The walk goes from the folder the
+//     run started in up to, but not including, the top folder, and stops at the
+//     first folder that holds one of `markers`: a file's path within the
+//     folder, or a function that is given the folder and answers yes or no. It
+//     never searches downward, so a fixture or a backup under the starting
+//     folder is not a hit.
+// Returns { side: <main copy> }, { below: <folder>, top: <top folder> } or null.
+//
+// shownFolder is how either folder is printed. The stop is one line that the
+// setup and upgrade prompts relay word for word, so a path is printed only
+// when it is plain path characters: letters, digits, spaces and
+// . _ - / \ : ~ + @ ( ). Any other path, one that holds a line break, a
+// backtick or a quote say, is named by a fixed phrase instead.
+function wrongFolder(start, top, markers) {
+  const real = (p) => { try { return fs.realpathSync(p); } catch (e) { return null; } };
+  const topReal = real(top);
+  if (topReal === null) return null;
+  const gitDir = git(['rev-parse', '--git-dir'], topReal);
+  const commonDir = git(['rev-parse', '--git-common-dir'], topReal);
+  const mine = gitDir ? real(path.resolve(topReal, gitDir)) : null;
+  const shared = commonDir ? real(path.resolve(topReal, commonDir)) : null;
+  if (mine !== null && shared !== null && mine !== shared) {
+    const first = (git(['worktree', 'list', '--porcelain'], topReal) || '').split(/\r?\n\r?\n/)[0].split(/\r?\n/);
+    const named = first.find(l => l.startsWith('worktree '));
+    const main = named && !first.includes('bare') ? real(named.slice('worktree '.length)) : null;
+    if (main !== null && main !== topReal && fs.existsSync(path.join(main, '.git'))) return { side: main };
+  }
+  const startReal = real(start);
+  const rel = startReal === null ? '' : path.relative(topReal, startReal);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const parts = rel.split(path.sep);
+  const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } };
+  for (let i = parts.length; i >= 1; i--) {
+    const dir = path.join(topReal, ...parts.slice(0, i));
+    if (markers.some(m => (typeof m === 'function' ? m(dir) : isFile(path.join(dir, m))))) return { below: dir, top: topReal };
+  }
+  return null;
+}
+function shownFolder(p) {
+  return /^[\p{L}\p{N} ._\-/\\:~+@()]{1,400}$/u.test(p) ? p : 'a folder whose name holds characters this line does not print';
+}
+// <<< wrong folder stop <<<
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const cwd = opts.project ? path.resolve(opts.project) : process.cwd();
@@ -708,6 +769,25 @@ function main() {
   // stop here, before anything is read, backed up or written.
   if (marketplaceNamesToolkit(project)) {
     console.error('setup-project: this is the toolkit\'s own repository (its marketplace file names the toolkit); nothing to seed.');
+    process.exit(1);
+  }
+  // Nor is a folder setup cannot work from (issue #291; see wrongFolder): a side
+  // copy, or toolkit files kept below the repository's top folder, where this
+  // run would seed a second install at the top. A copy-install counts as well as
+  // the state file, since moving one is this script's job: its manifest, or for
+  // an install from before the manifest the two marks copyInstallMarkers reads
+  // (VERSION beside the review command, or the old stamp in the rules file).
+  // It stops before anything is read, backed up or written, a dry run included.
+  // A first setup started in a folder that holds neither file is not stopped: it
+  // seeds the top folder, and the report's second line names that folder. The
+  // line names no command, because the plugin build rewrites command names only
+  // in prompts.
+  const oldInstall = (dir) => { const m = copyInstallMarkers(dir); return m.versionFile || m.stamp !== null; };
+  const wrong = wrongFolder(cwd, project, [STATE_REL, MANIFEST_REL, oldInstall]);
+  if (wrong !== null) {
+    console.error('setup-project: wrong folder: ' + (wrong.side
+      ? 'this folder is a side copy (a git worktree) of the project, and setup runs in the main copy, ' + shownFolder(wrong.side) + '. Open that folder and run it there. Nothing was read or changed here.'
+      : 'toolkit files are in ' + shownFolder(wrong.below) + ', below the top folder of this repository, ' + shownFolder(wrong.top) + '. Setup and the upgrade work only from a repository\'s top folder, so nothing was read or changed. See "Where to run setup and the upgrade" in the toolkit\'s install guide.'));
     process.exit(1);
   }
   const pluginRoot = path.resolve(opts.pluginRoot || path.join(__dirname, '..'));
