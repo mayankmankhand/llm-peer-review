@@ -1,6 +1,6 @@
 # The Auto Loop, continued (M9 to M17)
 
-Rules M9 to M17 of the toolkit loop. They continue `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`, which holds the overview and M1 to M8; the two files are one rule set, split only because Claude Code cuts any single pasted file over about 30 KB, and every command that pastes one pastes both.
+Rules M9 to M17 of the toolkit loop. They continue `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` (the overview, M1 and M2) and `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-fix.md` (M3 to M8); the three files are one rule set, which the loop rules skill loads whole.
 
 ## Gates and triggers
 

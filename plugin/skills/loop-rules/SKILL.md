@@ -18,3 +18,5 @@ allowed-tools:
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md"`
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md"`
+
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-fix.md"`

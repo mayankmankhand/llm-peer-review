@@ -529,7 +529,7 @@ const TIER3_INSTRUCTION = 'Try to refute each finding using its receipt output. 
 // One skeptic per 7 findings, ceiling (M2 tier 2).
 const SHARD_SIZE = 7;
 const SHARD_HEADER = /^M2 audit shard: tier (2|3), [^\n]*?, ids ((?:R\d+)(?: R\d+)*)[ \t]*\r?$/;
-// M3's verifier instruction, word for word as `.claude/skills/shared/hitl-loop.md`
+// M3's verifier instruction, word for word as `.claude/skills/shared/hitl-fix.md`
 // and the fix-verifier agent carry it (issue #267). The same three-way test
 // holds it as it holds M2's two instructions above.
 const M3_INSTRUCTION = 'Read the diff of the fixes against each finding\'s own words. "FIXED" means the defect the finding named is gone in the code as it now stands, not that a change was made near it. Return exactly one line per ID - "RN: FIXED" or "RN: NOT FIXED" - plus a one-line receipt each. Anything new you notice goes in your reasoning line as a note for the runner, never as a verdict.';

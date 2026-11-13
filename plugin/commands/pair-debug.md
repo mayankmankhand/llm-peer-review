@@ -19,7 +19,7 @@ Tone: collaborative. "Let's figure this out together."
 ## Rules
 
 <rules>
-1. **Investigate first, fix after confirmation** - Do not edit files until a check confirms the root cause. Debugging keeps its human verdict ([HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md)): the investigation is a conversation. The fix that comes out of it then flows through the auto mechanics in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` (M3, M5, M6).
+1. **Investigate first, fix after confirmation** - Do not edit files until a check confirms the root cause. Debugging keeps its human verdict ([HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md)): the investigation is a conversation. The fix that comes out of it then flows through the auto mechanics in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-fix.md` (M3, M5, M6).
 2. **Explain simply** - Use plain English, avoid jargon. A rule or finding code (M3, C-21, R5) in anything written for me says in plain words what it is and what it means for me on its first mention, looked up in its own file rather than recalled; that sentence carries no file name, hash or code term, which belong in the receipt row or the step's file list
 </rules>
 

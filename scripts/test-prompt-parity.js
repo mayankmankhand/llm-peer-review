@@ -151,7 +151,7 @@ check('the helper exists where the sentence points', fs.existsSync(path.join(REP
 // procedure as its own. The bullet must name the mode, so this case fails on
 // the pair that predates it rather than passing on any two matching copies.
 {
-  const m3 = (read('.claude/skills/shared/hitl-loop.md').split('\n').find((l) => l.startsWith('- **M3.')) || '').replace(/^- /, '');
+  const m3 = (read('.claude/skills/shared/hitl-fix.md').split('\n').find((l) => l.startsWith('- **M3.')) || '').replace(/^- /, '');
   const agent = read('.claude/agents/fix-verifier.md');
   const TRUST = 'Trust order for verification signals: a runnable check first, a different model second, a fresh same-model context last.';
   const { M3_INSTRUCTION } = require(path.join(REPO, '.claude', 'scripts', 'merge-findings.js'));
@@ -170,7 +170,7 @@ check('the helper exists where the sentence points', fs.existsSync(path.join(REP
 // flag a yes adds, the script takes that flag, and the digest line carries the
 // mark. A rule edit that drops one of the three phrases fails here.
 {
-  const m5 = read('.claude/skills/shared/hitl-loop.md').split('\n').find((l) => l.startsWith('- **M5.')) || '';
+  const m5 = read('.claude/skills/shared/hitl-fix.md').split('\n').find((l) => l.startsWith('- **M5.')) || '';
   const phrases = ['"try once more"', '`--owner-try <ID>`', "`(round 3, the owner's choice)`"];
   const missing = phrases.filter((p) => !m5.includes(p));
   const flagTaken = read('.claude/scripts/merge-findings.js').includes("'--owner-try'");
@@ -399,7 +399,7 @@ const PAGE_FILES = LOOP_FILES.filter(f => !f.includes('/upgrade/'));
 const LOAD_LINE = '**Load the loop rules and the report rules now**, through the Skill tool: `Skill(loop-rules)`, then `Skill(report-rules)`. Everything from here on cites them, so do not go on without both in context.';
 const GATE_LINE = '**The gate:** render the review page whenever this run has any surviving finding, or this branch\'s standing page already exists (`node .claude/scripts/render-html.js --standing --name review` prints `"exists":true`; M16), so the run can carry it forward or take it to empty. Skip only when there are no findings and no page yet.';
 const PAGE_LINE = '**When the gate fires, load the page rules now**, through the Skill tool: `Skill(review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.';
-const LOOP_FRAGMENTS = ['hitl-loop.md', 'hitl-stages.md', 'report-format.md', 'finding-contract.md', 'html-outputs.md'];
+const LOOP_FRAGMENTS = ['hitl-loop.md', 'hitl-fix.md', 'hitl-stages.md', 'report-format.md', 'finding-contract.md', 'html-outputs.md'];
 const PAGE_FRAGMENTS = ['html-render-review.md', 'html-viewing.md'];
 const pasteOf = (name) => '!`cat .claude/skills/shared/' + name + '`';
 // Where the load sentence must sit: after the heading that opens the phase
@@ -424,7 +424,7 @@ const STALE_PASTE = /\binlined (below|under|here|at the end|in Phase \d)\b|\bthe
     const stale = text.split(/\r?\n/).filter(l => STALE_PASTE.test(l)).length;
     if (stale) misses.push(rel + ': ' + stale + ' line(s) still say a fragment is inlined');
   }
-  check('the 12 loop files load loop-rules and report-rules before Phase 3 with one wording and paste none of their five fragments', misses.length === 0, misses.join('; '));
+  check('the 12 loop files load loop-rules and report-rules before Phase 3 with one wording and paste none of their six fragments', misses.length === 0, misses.join('; '));
 }
 {
   const misses = [];
@@ -578,6 +578,52 @@ console.log('\n8. the writing rules (#276, #280)');
   const head = REF.indexOf('#### Trimming the index');
   const at = STEPS.map(s => REF.indexOf(s));
   check('281: the trim guide holds its nine steps, 0 to 8, in order under its heading', head > -1 && at.every((p, i) => p > head && (i === 0 || p > at[i - 1])), JSON.stringify({ head, at }));
+}
+
+console.log('\n9. what a compression keeps (#293)');
+// After a compression Claude Code re-attaches each loaded command or skill,
+// keeping its first 5,000 tokens, 25,000 shared, newest first
+// (https://code.claude.com/docs/en/skills, "Skill content lifecycle"); local
+// cut copies end at exactly 20,000 characters of the expanded text. So what a
+// review needs after its report must sit near the top of one loaded skill, and
+// the gates the fixing obeys near the top of the loop rules. Measured on the
+// plugin copy, as other projects load it, with an allowance for the "Base
+// directory for this skill" line Claude Code puts on top (its install path
+// varies by machine).
+{
+  const KEEP = 20000;
+  const HEADER = 150;
+  const BAR = 18000;
+  // A prompt file's text as Claude Code loads it: the frontmatter dropped and
+  // each first-level `!cat` replaced by the file it names (plugin paths read
+  // from plugin/, a project seam such as .claude/toolkit/fix-rules.md from the
+  // repo, a missing file as nothing).
+  const expand = (rel) => read(rel).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
+    .replace(/!`cat "?(\$\{CLAUDE_PLUGIN_ROOT\}\/)?([^`"\s]+)"?( 2>\/dev\/null \|\| true)?`/g, (m, plugin, p) => {
+      try { return read(plugin ? path.posix.join('plugin', p) : p); } catch (e) { return ''; }
+    });
+  const loaded = ['plugin/commands/review.md'].concat(fs.readdirSync(path.join(REPO, 'plugin', 'skills'))
+    .map((d) => 'plugin/skills/' + d + '/SKILL.md').filter((f) => fs.existsSync(path.join(REPO, f))));
+  const texts = new Map(loaded.map((f) => [f, expand(f)]));
+  // Where an anchor's line ends in each loaded file that holds it.
+  const ends = (needle) => loaded.filter((f) => texts.get(f).includes(needle)).map((f) => {
+    const t = texts.get(f);
+    const nl = t.indexOf('\n', t.indexOf(needle));
+    return { file: f, end: nl === -1 ? t.length : nl };
+  });
+  const ANCHORS = ['Route each finding to its exit', 'saying "no chaining" runs the review and stops', '**M3. The fixer never verifies.**', '**M8. Receipts, not claims.**'];
+  const found = ANCHORS.map((a) => ({ anchor: a, at: ends(a) }));
+  const home = loaded.find((f) => ANCHORS.every((a) => texts.get(f).includes(a)));
+  const fits = !!home && found.every((x) => x.at.some((h) => h.file === home && h.end + HEADER <= BAR));
+  check('293: the after-report steps and the six fix rules sit inside the first 18,000 expanded characters of one loaded skill',
+    fits, found.map((x) => x.anchor.slice(0, 32) + ' ends at ' + (x.at.map((h) => h.file.replace(/^plugin\//, '') + ':' + h.end).join(', ') || 'nowhere')).join('; ') + '; one file holds all four: ' + (home || 'none'));
+
+  const rules = texts.get('plugin/skills/loop-rules/SKILL.md') || '';
+  const m10End = rules.indexOf('- **M11.');
+  const m9At = rules.indexOf('- **M9.');
+  check('293: the loop rules skill keeps the always-ask actions and the per-run opt-out inside its first 20,000 expanded characters',
+    m9At > -1 && m10End > m9At && m10End + HEADER <= KEEP,
+    'the always-ask list (M9) starts at ' + m9At + ' and the opt-out (M10) ends at ' + m10End + ', plus a ' + HEADER + '-character header allowance, against ' + KEEP);
 }
 
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');

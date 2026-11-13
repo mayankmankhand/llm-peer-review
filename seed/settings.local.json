@@ -160,6 +160,8 @@
       "Skill(tk:loop-rules:*)",
       "Skill(tk:report-rules)",
       "Skill(tk:report-rules:*)",
+      "Skill(tk:after-report)",
+      "Skill(tk:after-report:*)",
       "Skill(tk:review-page)",
       "Skill(tk:review-page:*)",
       "Skill(tk:writing)",
