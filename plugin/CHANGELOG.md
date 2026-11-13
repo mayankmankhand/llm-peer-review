@@ -24,6 +24,8 @@ The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin'
 
 The lessons log recorded a `cd` out of the project four times. The guard said nothing about a command while the shell sat at the project folder, and its own message recommended starting a command with `cd <full path> &&`, so each time the shell stayed in the wrong folder until the next command. Stopping the `cd` at its call means the shell never leaves. The command reader was tried on 12,001 saved calls before it shipped: the first version read text inside a here-document and a quoted `|` as commands, and the version that shipped wrongly stopped no step back to the project and no helper's command. The review of this work found two more gaps, a comment holding an apostrophe and a Windows path in double quotes, and both now have tests.
 
+Maintainer only: this release ships under the catch-rate override. Reason: No review-path file changed since v8.0.21, whose one overview-line change was already waived; the owner waived new Pocket runs on 2026-11-12.
+
 ### Notes
 
 - Maintainer only: #293 (keeping the review's closing steps through a compression of a long session) was built in this cycle and then undone on the owner's call. Counted over this repository's saved sessions, 15 of the 20 reviews that compressed partway did so before their report, where the change would not help, and none of the other 5 lost its place. It goes back to planning; nothing of it ships.
