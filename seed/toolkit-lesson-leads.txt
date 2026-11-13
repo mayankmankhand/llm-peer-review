@@ -237,6 +237,7 @@ Editing the currently-running command file trips the harness self-modification g
 Emit JSON, let a script stamp the boilerplate - it is faster to generate and easier to verify.
 Enforce invariants in code, not just comments - convention-only constraints erode as the codebase grows.
 Enter a folder with a lone `cd` call, then plain commands; a subshell, `cd &&`, `git -C`, `env -C` all ask.
+Enter a worktree with a lone `cd` call, then plain commands; a subshell, `cd &&`, `git -C`, `env -C` all ask.
 Every fix lands with a check that failed first; a fresh context re-verifies the judgment ones.
 Extending a running rollup beats adding a competing one.
 FS-probes for "is X installed" should fall through, not be authoritative.

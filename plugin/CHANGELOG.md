@@ -1,5 +1,32 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.21, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.22, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.22 - Stopped Before It Leaves (2026-11-12)
+
+**The folder guard now stops a `cd` out of the project at the command that makes it, instead of one command later (#307).** Before, a command that started with `cd <full path> &&` ran wherever it pointed, Claude's shell stayed in that folder, and the guard stopped only the next command. Maintainer only: a test now ties the docs' upgrade-check counts to the conventions file (#306).
+
+### Added
+
+- **Maintainer only: a test ties the docs' upgrade-check counts to the conventions file (#306).** Three docs say in words how many upgrade checks run on every upgrade and how many run once, and nothing checked those words, so they went stale whenever a check's schedule moved. The docs test now counts the checks in the conventions file and fails, naming the doc and line, when a count phrase disagrees or has been reworded away.
+
+### Changed
+
+- **The folder guard stops a `cd` out of the project before it runs (#307).** It reads every `cd` in a Bash command, wherever one starts a command, and stops a move to any folder other than the project folder or the top folder of a git working copy such as a worktree. The stop names the folder and tells Claude to use it in the command's own paths instead (`ls <folder>/`), so the shell never leaves. A `cd` to the project folder, to a worktree's top folder, or through the project folder variable (`$CLAUDE_PROJECT_DIR`) still runs. A bare `cd` and `cd ~` are judged by the home folder they go to; `cd -`, or a folder held in any other variable, a backtick or a wildcard, is stopped because the guard cannot see where it goes. Text inside quotes, a here-document or a comment is not read as a command, and a `cd` inside `( )` or `$( )` moves nothing, so it is left alone. A helper agent's `cd` is left alone too, since it never carries to the helper's next command.
+
+### Upgrading
+
+- Everything arrives with the plugin update, with no setup step and no new permission rows.
+- When Claude starts to move out of the project, you may see one line starting `folder-guard: this command moves Claude's shell to`. Nothing is needed from you: Claude rewrites the command with the folder in its paths.
+- If the guard misbehaves, start a session with `claude --settings '{"disableAllHooks": true}'`, which turns every hook off for that session.
+- The folder guard is a Claude Code hook, so it comes with the plugin only; a copy-install for other editors has no guard.
+
+### Why
+
+The lessons log recorded a `cd` out of the project four times. The guard said nothing about a command while the shell sat at the project folder, and its own message recommended starting a command with `cd <full path> &&`, so each time the shell stayed in the wrong folder until the next command. Stopping the `cd` at its call means the shell never leaves. The command reader was tried on 12,001 saved calls before it shipped: the first version read text inside a here-document and a quoted `|` as commands, and the version that shipped wrongly stopped no step back to the project and no helper's command. The review of this work found two more gaps, a comment holding an apostrophe and a Windows path in double quotes, and both now have tests.
+
+### Notes
+
+- Maintainer only: #293 (keeping the review's closing steps through a compression of a long session) was built in this cycle and then undone on the owner's call. Counted over this repository's saved sessions, 15 of the 20 reviews that compressed partway did so before their report, where the change would not help, and none of the other 5 lost its place. It goes back to planning; nothing of it ships.
 
 ## v8.0.21 - The Map Waits for Main (2026-11-12)
 

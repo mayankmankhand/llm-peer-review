@@ -1,6 +1,6 @@
 # Seeded blocks older releases shipped, for the upgrade audit (C-15).
 # <hash> <block|file> <project file> <first release that shipped it>
-# Written by scripts/seed-history.js from the release tags v6.0.0 to v8.0.20; regenerate it in the release order, never edit it by hand.
+# Written by scripts/seed-history.js from the release tags v6.0.0 to v8.0.21; regenerate it in the release order, never edit it by hand.
 0e89af0bed8f17df block CLAUDE.md v6.0.0
 5f9c8b07ae0940d4 block CLAUDE.md v6.0.0
 61d9d273b3a7ff53 block CLAUDE.md v6.0.0
@@ -64,6 +64,7 @@ a63a826b272bbda6 file LESSONS.md v8.0.17
 b7f1eaf140be5dd7 file LESSONS.md v8.0.18
 87e7ccc43fdd90dc file LESSONS.md v8.0.19
 632114221f135c02 file LESSONS.md v8.0.20
+8683837f9f171de3 file LESSONS.md v8.0.21
 528144ebf1bcc41e block DESIGN-PROFILE.md v6.2.0
 6ba9be597090a72d block DESIGN-PROFILE.md v7.1.0
 7d363ac197269d32 block DESIGN-PROFILE.md v7.2.0
