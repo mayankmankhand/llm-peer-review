@@ -658,7 +658,7 @@ function run(mode, text, opts) {
 }
 
 module.exports = {
-  HELD, NEVER_HELD, LINE_OF, classify, splitParts, closingOf, newState, mayMatter, apply, scanText,
+  HELD, NEVER_HELD, LINE_OF, TYPED_COMMAND, typedText, classify, splitParts, closingOf, newState, mayMatter, apply, scanText,
   readRecord, readSize, readPct, limitFor, decide, isHelper, loadState, writeNote, noteLine, warning, run,
 };
 
