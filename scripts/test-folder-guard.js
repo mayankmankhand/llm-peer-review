@@ -267,6 +267,36 @@ const namesPaths = (r) => denied(r) && /paths/.test(r.result.reason) && !/lets t
   check('307: a cd inside a subshell or a command substitution is not a move', got.every(silent), got.map(shown).join(' | '));
 }
 {
+  // A comment runs to the end of its line, an apostrophe inside it included,
+  // so a cd on the next line is still read; a commented-out cd moves nothing,
+  // and a # inside a word starts no comment.
+  const got = ["# check what's there\ncd " + OUTSIDE + ' && ls', "ls # it's fine\ncd " + OUTSIDE, 'echo a#b; cd ' + OUTSIDE].map((c) => judge(bash(c, PROJECT), ENV));
+  const off = judge(bash('# cd ' + OUTSIDE + '\nls', PROJECT), ENV);
+  check('307: a comment with an apostrophe does not hide a cd on a later line, and a commented-out cd is not a move',
+    got.every(namesPaths) && silent(off), got.concat([off]).map(shown).join(' | '));
+}
+{
+  // Inside double quotes a backslash escapes only $, `, ", \ and a new line,
+  // so a quoted Windows path keeps its backslashes.
+  const win = { platform: 'win32', isWorkingCopyTop: () => false, realpath: (p) => p };
+  const env = { CLAUDE_PROJECT_DIR: 'C:\\Users\\Me\\Proj' };
+  const a = judge(bash('cd "C:\\Users\\Me\\Proj" && dir', 'C:\\Users\\Me\\Proj'), env, win);
+  const b = judge(bash('cd "C:\\Users\\Me\\Proj"', 'C:\\Users\\Me\\Proj\\sub'), env, win);
+  const c = judge(bash('cd "C:\\Users\\Me\\Other" && dir', 'C:\\Users\\Me\\Proj'), env, win);
+  check('307: a double-quoted Windows path keeps its backslashes, so a cd to the project passes and one elsewhere is refused by name',
+    silent(a) && silent(b) && namesPaths(c) && c.result.reason.includes('C:\\Users\\Me\\Other'), [a, b, c].map(shown).join(' | '));
+}
+{
+  // The hook knows the project folder variable's value, so a cd through it is
+  // read as that folder: a step back passes, a move into a subfolder is refused.
+  const a = judge(bash('cd "$CLAUDE_PROJECT_DIR" && ls', PROJECT), ENV);
+  const b = judge(bash('cd ${CLAUDE_PROJECT_DIR}', SUB), ENV);
+  const c = judge(bash('cd "$CLAUDE_PROJECT_DIR"', SUB), ENV);
+  const d = judge(bash('cd "$CLAUDE_PROJECT_DIR/sub" && ls', PROJECT), ENV);
+  check('307: a cd through the project folder variable is read as the project folder, so a step back passes and a move into a subfolder is refused by name',
+    silent(a) && silent(b) && silent(c) && namesPaths(d) && d.result.reason.includes(SUB), [a, b, c, d].map(shown).join(' | '));
+}
+{
   const r = judge(bash('ls', SUB), ENV);
   check('307: the step-back refusal no longer recommends a cd before &&', denied(r) && !/lets through/.test(r.result.reason), shown(r));
 }

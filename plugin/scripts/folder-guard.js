@@ -24,8 +24,8 @@
 //     repository on purpose;
 //   - while the shell is elsewhere, a Bash command whose first part is
 //     `cd <absolute path>`, alone or followed by &&, to one of those two kinds
-//     of folder. A lone `cd <root>` is how Claude steps back, and it asks for
-//     no approval;
+//     of folder; the project folder variable counts as the root's full path.
+//     A lone `cd <root>` is how Claude steps back, and it asks for no approval;
 //   - any other tool, which names its own file.
 // Anything else is denied (PreToolUse) or blocked once (Stop), with the reason
 // Claude reads: where the shell is, and the cd that steps back.
@@ -33,9 +33,10 @@
 // The cd itself is judged too, wherever the shell sits (issue #307): a Bash
 // command with a cd to any other folder is denied at that call, wherever the
 // cd starts a command (the start, or after &&, ;, ||, | or a new line), full
-// path or relative, a bare `cd` and `~` read as the home folder, and `cd -`
-// or a folder held in a variable, a backtick or a wildcard refused because
-// the guard cannot see it. Before, a command that started with
+// path or relative, a bare `cd` and `~` read as the home folder, the project
+// folder variable read as the root, a comment skipped to its line's end, and
+// `cd -` or a folder held in any other variable, a backtick or a wildcard
+// refused because the guard cannot see it. Before, a command that started with
 // `cd <absolute path> &&` passed whatever the folder, the shell stayed there,
 // and only the next call was refused: the lessons log recorded that slip
 // three times. A helper's cd is left alone (its input
@@ -142,6 +143,13 @@ function commandParts(command) {
       continue;
     }
     if (ch === '\\' && i + 1 < s.length) { cur += ch + s[i + 1]; i += 2; continue; }
+    // A # that starts a word opens a comment to the end of its line; read as
+    // text, an apostrophe inside it would open a quote that swallows every
+    // later line, cd included.
+    if (ch === '#' && (i === 0 || /[\s;&|()]/.test(s[i - 1]))) {
+      while (i < s.length && s[i] !== '\n') i++;
+      continue;
+    }
     if (ch === "'" || ch === '"') { quote = ch; cur += ch; i++; continue; }
     if (s.startsWith('<<', i) && s[i + 2] !== '<') {
       const m = /^<<-?[ \t]*(['"]?)([A-Za-z0-9_]+)\1/.exec(s.slice(i));
@@ -201,7 +209,9 @@ function partWords(part) {
       if (ch === '"') {
         let j = i + 1;
         while (j < s.length && s[j] !== '"') {
-          if (s[j] === '\\' && j + 1 < s.length) { text += s[j + 1]; j += 2; continue; }
+          // The shell's rule: inside double quotes a backslash escapes only
+          // $, `, ", \ and a new line, so a Windows path keeps its backslashes.
+          if (s[j] === '\\' && j + 1 < s.length && /[$`"\\\n]/.test(s[j + 1])) { if (s[j + 1] !== '\n') text += s[j + 1]; j += 2; continue; }
           if (s[j] === '$' || s[j] === '`') dynamic = true;
           text += s[j];
           j++;
@@ -223,15 +233,20 @@ function partWords(part) {
 // Words that can stand before a command at the start of a part.
 const LEADS = new Set(['{', '!', 'then', 'do', 'else', 'elif', 'if', 'while', 'until', 'time']);
 
+// The project folder variable at the start of a word: the one variable whose
+// value the hook knows, from its own environment.
+const PROJECT_VAR = /^\$(?:\{CLAUDE_PROJECT_DIR\}|CLAUDE_PROJECT_DIR(?![A-Za-z0-9_]))/;
+
 // Every folder a command's cd words go to, resolved the way the shell would: a
 // relative path against the shell's folder, a bare `cd`, `~` and `~/...` from
-// the home folder. A target the guard cannot know comes back as null: `cd -`
-// (the previous folder) and a folder held in a variable, a backtick or a
-// wildcard. A cd
-// inside ( ) or $( ) runs in a subshell and moves nothing, so its part starts
-// with `(` or `$(` and is not read as a cd.
+// the home folder, and the project folder variable from the hook's own value.
+// A target the guard cannot know comes back as null: `cd -` (the previous
+// folder) and a folder held in any other variable, a backtick or a wildcard.
+// A cd inside ( ) or $( ) runs in a subshell and moves nothing, so its part
+// starts with `(` or `$(` and is not read as a cd.
 function cdTargets(command, here, env, platform) {
   const p = pathApi(platform);
+  const projectDir = env && env.CLAUDE_PROJECT_DIR;
   const targets = [];
   for (const part of commandParts(command)) {
     const words = partWords(part);
@@ -241,7 +256,9 @@ function cdTargets(command, here, env, platform) {
     k++;
     while (k < words.length && !words[k].quoted && /^-[LPe@]+$/.test(words[k].text)) k++;
     const arg = words[k];
+    const rest = arg && arg.dynamic && projectDir ? arg.text.replace(PROJECT_VAR, '') : null;
     if (arg === undefined) targets.push(homeOf(env));
+    else if (rest !== null && rest !== arg.text && !/[$`*?[]/.test(rest)) targets.push(p.resolve(rest ? p.join(projectDir, rest) : projectDir));
     else if (arg.dynamic || (arg.text === '-' && !arg.quoted)) targets.push(null);
     else if (!arg.quoted && (arg.text === '~' || arg.text.startsWith('~/'))) targets.push(p.resolve(homeOf(env), arg.text.slice(2)));
     else targets.push(p.resolve(here, arg.text));
@@ -259,8 +276,10 @@ function denyReason(here, root, what) {
     '` as a Bash command of its own, then run it again. A command that needs another folder names it in its own paths instead of moving into it.';
 }
 function cdReason(target, root) {
-  const where = target === null ? 'a folder the guard cannot see (`cd -`, or a folder held in a variable, a backtick or a wildcard),' : target + ',';
-  return 'folder-guard: this command moves Claude\'s shell to ' + where + ' outside the project folder ' + root +
+  const where = target === null
+    ? 'a folder the guard cannot see (`cd -`, or a folder held in a variable, a backtick or a wildcard), so it cannot tell whether that is the project folder ' + root
+    : target + ', outside the project folder ' + root;
+  return 'folder-guard: this command moves Claude\'s shell to ' + where +
     ', and the move would stay in force for the next command. Name that folder in the command\'s own paths instead of moving into it (for example `ls <folder>/` or `grep -n x <folder>/<file>`). A cd to the project folder, or to the top folder of a git working copy such as a worktree, still runs.';
 }
 function stopReason(here, root) {
@@ -298,8 +317,12 @@ function decide(input, env, deps) {
       for (const t of targets) if (t === null || !allowed(t)) return { decision: 'deny', reason: cdReason(t, root) };
     }
     if (hereOk) return null;
+    // A step back written with the project folder variable names the root as
+    // surely as its full path does; the word reader refuses any $, so the
+    // variable is put in as the hook's own value before it reads.
+    const stepBack = command.replace(/^(\s*cd\s+)("?)\$(?:\{CLAUDE_PROJECT_DIR\}|CLAUDE_PROJECT_DIR(?![A-Za-z0-9_]))\2(?=\s|$)/, (m, lead) => lead + shellWord(rootRaw));
     let named;
-    try { named = startsWithAbsoluteCd(command, d.platform); } catch (e) { return null; }
+    try { named = startsWithAbsoluteCd(stepBack, d.platform); } catch (e) { return null; }
     if (named) return null;
   } else if (hereOk) return null;
   return { decision: 'deny', reason: denyReason(here, root, WHAT[input.tool_name]) };

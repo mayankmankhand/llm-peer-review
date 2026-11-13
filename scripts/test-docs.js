@@ -240,23 +240,20 @@ function docCountProblems(texts, counts) {
 
   // Each count phrase changed in turn, in an in-memory copy of its doc: every
   // one must be reported with its file and line, so no phrase's anchor can rot
-  // into a pattern that matches nothing while the case stays green.
-  const SAMPLES = [
-    ['docs/CONVENTIONS.md', /Eleven(?= checks run on every upgrade)/],
-    ['docs/CONVENTIONS.md', /Four(?= are run-once checks)/],
-    ['docs/CONVENTIONS.md', /four(?= run-once checks above)/],
-    ['docs/INSTALL.md', /Eleven(?= of its checks run on every upgrade)/],
-    ['docs/INSTALL.md', /four(?= run-once checks:)/],
-    ['AGENT-SETUP.md', /eleven(?= of its checks run on every upgrade)/],
-  ];
+  // into a pattern that matches nothing while the case stays green. The word
+  // changed is the one the phrase's own pattern captures, so a correct count
+  // change in the docs needs no edit here.
   const missed = [];
-  for (const [rel, re] of SAMPLES) {
-    const m = re.exec(texts[rel]);
-    if (!m) { missed.push(rel + ': no sample sentence ' + re); continue; }
-    const line = texts[rel].slice(0, m.index).split('\n').length;
-    const copy = Object.assign({}, texts, { [rel]: texts[rel].replace(re, 'nineteen') });
+  for (const p of COUNT_PHRASES) {
+    const text = texts[p.file];
+    const hit = [...text.matchAll(new RegExp(p.re.source, 'gd'))][0];
+    if (!hit) { missed.push(p.file + ': no sample sentence for ' + p.name); continue; }
+    const line = text.slice(0, hit.index).split('\n').length;
+    const [from, to] = hit.indices[1];
+    const wrong = counts[p.kind] === 19 ? 'eighteen' : 'nineteen';
+    const copy = Object.assign({}, texts, { [p.file]: text.slice(0, from) + wrong + text.slice(to) });
     const found = docCountProblems(copy, counts);
-    if (!found.some(p => p.startsWith(rel + ':' + line + ':'))) missed.push(rel + ':' + line + ' not reported (got: ' + (found.join('; ') || 'nothing') + ')');
+    if (!found.some(q => q.startsWith(p.file + ':' + line + ':'))) missed.push(p.file + ':' + line + ' not reported (got: ' + (found.join('; ') || 'nothing') + ')');
   }
   check('306: a doc copy with one count changed fails, naming the file and line', missed.length === 0, missed.join('; '));
 

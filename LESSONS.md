@@ -369,7 +369,7 @@
 ## Issue 232 (land without losing work)
 
 - **A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`.**
-- **Enter a folder with a lone `cd` call, then plain commands; a subshell, `cd &&`, `git -C`, `env -C` all ask.**
+- **Enter a worktree with a lone `cd` call, then plain commands; a subshell, `cd &&`, `git -C`, `env -C` all ask.**
 - **Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.**
 - **When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.**
 
