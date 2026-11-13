@@ -5,7 +5,7 @@
 
 Now implement precisely as planned, in full.
 
-Executing an approved plan is the auto stage of the toolkit loop: the plan approval was the human gate, and `/execute` is never chained into automatically (M14). The loop's shared mechanics live in `.claude/skills/shared/hitl-loop.md`, `.claude/skills/shared/hitl-fix.md` and `.claude/skills/shared/hitl-stages.md` (rationale in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md)). Two per-run opt-outs: "report only" restores report-first behavior for the run (M10), "no chaining" stops after this stage instead of handing off to `/review` (M14).
+Executing an approved plan is the auto stage of the toolkit loop: the plan approval was the human gate, and `/execute` is never chained into automatically (M14). The loop's shared mechanics live in `.claude/skills/shared/hitl-loop.md` and `.claude/skills/shared/hitl-stages.md` (rationale in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md)). Two per-run opt-outs: "report only" restores report-first behavior for the run (M10), "no chaining" stops after this stage instead of handing off to `/review` (M14).
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void. A note that the command printed nothing means this project adds none.
 

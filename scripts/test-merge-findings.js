@@ -1475,11 +1475,11 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
     JSON.stringify(n1).slice(0, 600));
   // The verifier instruction lives in three places and a change to one must
   // fail here rather than drift, as section 8 holds M2's two instructions.
-  const HITL = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'skills', 'shared', 'hitl-fix.md'), 'utf8');
+  const HITL = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'skills', 'shared', 'hitl-loop.md'), 'utf8');
   const VERIFIER = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'agents', 'fix-verifier.md'), 'utf8');
-  check11('M3_INSTRUCTION is the verifier sentence hitl-fix.md and fix-verifier.md carry',
+  check11('M3_INSTRUCTION is the verifier sentence hitl-loop.md and fix-verifier.md carry',
     typeof mod.M3_INSTRUCTION === 'string' && HITL.includes(mod.M3_INSTRUCTION) && VERIFIER.includes(mod.M3_INSTRUCTION),
-    'in hitl-fix.md: ' + HITL.includes(mod.M3_INSTRUCTION) + '; in the agent: ' + VERIFIER.includes(mod.M3_INSTRUCTION));
+    'in hitl-loop.md: ' + HITL.includes(mod.M3_INSTRUCTION) + '; in the agent: ' + VERIFIER.includes(mod.M3_INSTRUCTION));
 
   // Issue #283: a receipt tied to a line number ("line 1668 holds this text")
   // inverted into a noMatch on that same number, which any edit above the line

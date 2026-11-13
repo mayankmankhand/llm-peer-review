@@ -3,7 +3,7 @@
 **Use this when:** Updating README, CLAUDE.md, CHANGELOG or LESSONS after code changes have shipped. The codebase map is not refreshed here: `/merge` offers that once work lands on main (M12).
 **Don't use this when:** You only need in-code docstrings or comments (just edit the code directly), or you are mid-implementation - wait until the work is done.
 
-You are updating documentation after code changes. Run the steps automatically, receipts required: every claim of work done carries its evidence per M8, and the run ends with a short digest of what was updated, committed, and pushed. The auto loop's operating rules live in `.claude/skills/shared/hitl-loop.md`, `.claude/skills/shared/hitl-fix.md` and `.claude/skills/shared/hitl-stages.md` (rule IDs M1-M17). Saying **"report only"** on this run restores the confirm-first flow for that run (M10).
+You are updating documentation after code changes. Run the steps automatically, receipts required: every claim of work done carries its evidence per M8, and the run ends with a short digest of what was updated, committed, and pushed. The auto loop's operating rules live in `.claude/skills/shared/hitl-loop.md` and `.claude/skills/shared/hitl-stages.md` (rule IDs M1-M17). Saying **"report only"** on this run restores the confirm-first flow for that run (M10).
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void. A note that the command printed nothing means this project adds none.
 

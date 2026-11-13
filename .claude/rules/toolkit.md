@@ -10,7 +10,7 @@ This project runs the LLM Peer Review toolkit. On the plugin its commands are ty
 
 <rules>
 
-1. **Auto by default** - The loop runs automatically per the toolkit's `hitl-loop`, `hitl-fix` and `hitl-stages` fragments (rules M1 to M17), which each loop stage either inlines or cites by path; a human is paged only per M1, stages hand off to each other automatically (M14), and two per-run opt-outs restore manual behavior: "report only" for auto-fixing (M10), "no chaining" for the stage handoff (M14)
+1. **Auto by default** - The loop runs automatically per the toolkit's `hitl-loop` and `hitl-stages` fragments (rules M1 to M17), which each loop stage either inlines or cites by path; a human is paged only per M1, stages hand off to each other automatically (M14), and two per-run opt-outs restore manual behavior: "report only" for auto-fixing (M10), "no chaining" for the stage handoff (M14)
 2. **Ask questions** - If something is unclear, ask before assuming
 3. **Explain simply** - Use plain English, avoid jargon. A rule or finding code (M3, C-21, R5) in anything written for me says in plain words what it is and what it means for me on its first mention, looked up in its own file rather than recalled; that sentence carries no file name, hash or code term, which belong in the receipt row or the step's file list
 4. **Show your work** - Tell me what you're doing and why. Before anything expected to take over a minute, say in one line what is coming, and answer every question I ask before moving on

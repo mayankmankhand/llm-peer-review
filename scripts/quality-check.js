@@ -1883,7 +1883,7 @@ function mean(xs) {
 // skills, which are part of every finder's prompt). For the mapper: /index, whose
 // Step 3 template is the dispatch prompt, and the mapper's own file.
 const PATH_FILES = {
-  review: /^(scripts\/(run-checks|merge-findings)\.js|commands\/review\.md|skills\/shared\/(hitl-loop|hitl-fix|report-format|dispatch-format|finding-contract|criteria-[a-z]+)\.md|skills\/(review-[a-z]+-criteria|dispatch-contract|after-report)\/SKILL\.md|agents\/(review-[a-z]+-finder|audit-skeptic)\.md)$/,
+  review: /^(scripts\/(run-checks|merge-findings)\.js|commands\/review\.md|skills\/shared\/(hitl-loop|report-format|dispatch-format|finding-contract|criteria-[a-z]+)\.md|skills\/(review-[a-z]+-criteria|dispatch-contract)\/SKILL\.md|agents\/(review-[a-z]+-finder|audit-skeptic)\.md)$/,
   mapper: /^(commands\/index\.md|agents\/index-mapper\.md)$/,
 };
 

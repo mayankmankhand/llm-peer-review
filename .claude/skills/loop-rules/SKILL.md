@@ -9,5 +9,3 @@ user-invocable: false
 !`cat .claude/skills/shared/hitl-loop.md`
 
 !`cat .claude/skills/shared/hitl-stages.md`
-
-!`cat .claude/skills/shared/hitl-fix.md`

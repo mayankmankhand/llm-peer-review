@@ -10,7 +10,7 @@ flowchart TB
 
   %% Limits come from their sources: the critic's 2 rounds from
   %% .claude/commands/create-plan.md, the check loop from M17 in hitl-stages.md,
-  %% the 2 fix tries from M5 in hitl-fix.md, the hooks from
+  %% the 2 fix tries from M5 in hitl-loop.md, the hooks from
   %% .claude/scripts/session-start.js and pre-push-check.js.
 
   G1("Gate in<br/>session-start hook") --- E("/tk:explore") --- P("/tk:create-plan") --- Y("You approve") --- X("/tk:execute") --- R("/tk:review") --- D("/tk:document") -.- M("/tk:merge")
