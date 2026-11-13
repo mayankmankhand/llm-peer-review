@@ -547,5 +547,208 @@ test('293: run as a hook, it exits 2 to hold and 0 to let through, and prints no
   must(bad.status === 0, 'unreadable input did not let through: ' + bad.status);
 });
 
+// ---- the handoff note and the printed line (step 2) --------------------------------------------------
+
+// A finished review, then the compression that comes due before the next stage starts.
+function finishedReview(sb) {
+  sb.start('startup');
+  sb.add(typed('review'), assistant([bash('ls')], 500000));
+  must(held(sb.pre()), 'not held while the review ran');
+  sb.add(assistant([bash(CHAIN_REVIEW)], 520000));
+  const a = sb.pre();
+  must(through(a, 'no-stage'), show(a));
+  return a;
+}
+const notesIn = (sb) => { try { return fs.readdirSync(path.join(sb.opts.dataDir, 'notes')); } catch (e) { return []; } };
+
+test('293: one line is printed after a between-stage compression', () => {
+  const sb = sandbox();
+  finishedReview(sb);
+  sb.add(boundary(520000, 40000));
+  const s = sb.start('compact');
+  const lines = s.stdout.split('\n').filter(Boolean);
+  must(s.exit === 0 && lines.length === 1, s.stdout);
+  const note = notesIn(sb)[0];
+  must(note && lines[0].includes('reports/hold-compression/notes/' + note), { line: lines[0], note });
+  must(lines[0].includes('/document') && /closing call/.test(lines[0]), lines[0]);
+});
+
+test('293: the note is written when a compression is let through after a closing call', () => {
+  const sb = sandbox();
+  const a = finishedReview(sb);
+  const notes = notesIn(sb);
+  must(notes.length === 1 && a.row.note === 'reports/hold-compression/notes/' + notes[0], { notes, row: a.row });
+});
+
+function gitIn(dir, args, date) {
+  const env = Object.assign({}, process.env, date ? { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : {});
+  const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false'].concat(args), { cwd: dir, env, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error('git ' + args.join(' ') + ': ' + r.stderr);
+  return r.stdout;
+}
+
+test('293: the note names the stage, its closing call, the next stage, the newest files, the branch and the checkpoints', () => {
+  const sb = sandbox();
+  const p = sb.project;
+  gitIn(p, ['init', '-q', '-b', 'issue-293-branch']);
+  fs.mkdirSync(path.join(p, 'plans'));
+  fs.mkdirSync(path.join(p, 'reports', 'explore'), { recursive: true });
+  fs.writeFileSync(path.join(p, 'plans', 'PLAN-old.md'), '# old\n\n**Overall Progress:** `100%`\n');
+  fs.writeFileSync(path.join(p, 'plans', 'PLAN-new.md'), '# new\n\n**Overall Progress:** `85%`\n**Models:** fit\n');
+  fs.utimesSync(path.join(p, 'plans', 'PLAN-old.md'), new Date('2026-11-01'), new Date('2026-11-01'));
+  fs.writeFileSync(path.join(p, 'reports', 'explore', '2026-11-13-a.md'), 'x');
+  fs.writeFileSync(path.join(p, 'reports', 'review-orchestrator-2026-11-14-010101.md'), 'x');
+  fs.writeFileSync(path.join(p, 'a.txt'), '1');
+  gitIn(p, ['add', 'a.txt']);
+  gitIn(p, ['commit', '-q', '-m', 'Before the stage began'], '2026-11-01T00:00:00Z');
+  fs.writeFileSync(path.join(p, 'a.txt'), '2');
+  gitIn(p, ['commit', '-q', '-am', 'Fix the review finding'], '2026-11-20T00:00:00Z');
+  finishedReview(sb);
+  const text = fs.readFileSync(path.join(sb.opts.dataDir, 'notes', notesIn(sb)[0]), 'utf8');
+  for (const want of ['review', CHAIN_REVIEW, '/document', 'plans/PLAN-new.md', '**Overall Progress:** `85%`',
+    'reports/explore/2026-11-13-a.md', 'reports/review-orchestrator-2026-11-14-010101.md', 'issue-293-branch', 'Fix the review finding']) {
+    must(text.includes(want), 'the note lacks: ' + want + '\n' + text);
+  }
+  must(!text.includes('Before the stage began') && !text.includes('PLAN-old.md'), text);
+});
+
+test('293: a part the note cannot read is left out and the note is still written', () => {
+  const sb = sandbox();
+  finishedReview(sb);
+  const notes = notesIn(sb);
+  must(notes.length === 1, notes);
+  const text = fs.readFileSync(path.join(sb.opts.dataDir, 'notes', notes[0]), 'utf8');
+  must(text.includes(CHAIN_REVIEW) && !/Newest plan|Branch|checkpoints since/i.test(text), text);
+});
+
+test('293: no note with no finished stage behind it', () => {
+  const sb = sandbox();
+  sb.start('startup');
+  sb.add(assistant([bash('ls')], 500000));
+  must(through(sb.pre(), 'no-stage'), 'not let through');
+  sb.add(typed('execute'), assistant([bash('ls')], 600000), typed('merge'), assistant([bash('ls')], 610000));
+  must(through(sb.pre(), 'no-stage'), 'not let through after merge');
+  must(notesIn(sb).length === 0, notesIn(sb));
+  // Control: the same session does write one once a stage finishes.
+  sb.add(typed('review'), assistant([bash(CHAIN_REVIEW)], 620000));
+  must(through(sb.pre(), 'no-stage') && notesIn(sb).length === 1, 'no note after a finished stage');
+});
+
+test('293: nothing is printed after a compression at the limit', () => {
+  const sb = sandbox();
+  sb.start('startup');
+  sb.add(typed('execute'), assistant([bash('ls')], 500000));
+  must(held(sb.pre()), 'not held');
+  sb.add(assistant([bash('ls')], 905000));
+  must(through(sb.pre(), 'limit'), 'not let through at the limit');
+  sb.add(boundary(905000, 40000));
+  const s = sb.start('compact');
+  must(s.stdout === '' && notesIn(sb).length === 0, { stdout: s.stdout, notes: notesIn(sb) });
+  // Control: the same session prints once a stage finishes before a compression.
+  sb.add(assistant([bash('node .claude/scripts/session-init.js --chain execute')], 60000), assistant([bash('ls')], 500000));
+  must(through(sb.pre(), 'no-stage'), 'not let through after the closing call');
+  must(sb.start('compact').stdout !== '', 'nothing printed after a between-stage compression');
+});
+
+test('293: nothing is printed after a typed compression', () => {
+  const sb = sandbox();
+  sb.start('startup');
+  sb.add(typed('review'), assistant([bash(CHAIN_REVIEW)], 300000));
+  const a = sb.pre({ trigger: 'manual' });
+  must(through(a, 'not-auto'), show(a));
+  sb.add(boundary(300000, 40000));
+  const s = sb.start('compact');
+  must(s.stdout === '' && notesIn(sb).length === 0, { stdout: s.stdout, notes: notesIn(sb) });
+  // Control: an automatic one in the same place does print.
+  sb.add(assistant([bash('ls')], 500000));
+  must(through(sb.pre(), 'no-stage'), 'not let through');
+  must(sb.start('compact').stdout !== '', 'nothing printed after an automatic between-stage compression');
+});
+
+test('293: nothing is printed a second time for the same compression, or for a stale note', () => {
+  const sb = sandbox();
+  finishedReview(sb);
+  must(sb.start('compact').stdout !== '', 'nothing printed the first time');
+  must(sb.start('compact').stdout === '', 'printed a second time');
+  // A note whose compression never followed within 15 minutes is not printed later.
+  const sb2 = sandbox();
+  let now = Date.parse('2026-11-14T10:00:00Z');
+  sb2.opts.now = () => new Date(now);
+  finishedReview(sb2);
+  now += 16 * 60 * 1000;
+  must(sb2.start('compact').stdout === '', 'a stale note was printed');
+});
+
+// ---- the warning ------------------------------------------------------------------------------------
+
+// Writes log rows straight into a sandbox's log: [days ago, row fields] pairs.
+function plantLog(sb, nowMs, rows) {
+  fs.mkdirSync(sb.opts.dataDir, { recursive: true });
+  fs.appendFileSync(path.join(sb.opts.dataDir, 'log.jsonl'), rows.map(([days, r]) => JSON.stringify(Object.assign({ t: new Date(nowMs - days * 86400000).toISOString() }, r)) + '\n').join(''));
+}
+const THROUGH = { event: 'pre', decision: 'through', reason: 'no-stage', line: 6 };
+const HELD_ROW = { event: 'pre', decision: 'held', reason: 'held', line: null };
+
+test('293: at a fresh start one line warns of an unreported row that could not be read', () => {
+  const now = Date.parse('2026-11-20T09:00:00Z');
+  for (const reason of ['unreadable-input', 'unreadable-record', 'unreadable-size', 'error']) {
+    const sb = sandbox();
+    sb.opts.now = () => new Date(now);
+    plantLog(sb, now, [[2, HELD_ROW], [1, { event: 'pre', decision: 'through', reason, line: 1 }]]);
+    const lines = sb.start('startup').stdout.split('\n').filter(Boolean);
+    must(lines.length === 1 && /\b1\b/.test(lines[0]) && lines[0].includes('could not'), { reason, lines });
+  }
+});
+
+test('293: at a fresh start one line warns when 14 days hold 5 let through and none held', () => {
+  const now = Date.parse('2026-11-20T09:00:00Z');
+  const sb = sandbox();
+  sb.opts.now = () => new Date(now);
+  plantLog(sb, now, [[20, HELD_ROW], [13, THROUGH], [10, THROUGH], [6, THROUGH], [3, THROUGH], [1, THROUGH]]);
+  const lines = sb.start('startup').stdout.split('\n').filter(Boolean);
+  must(lines.length === 1 && /\b5\b/.test(lines[0]) && /14 days/.test(lines[0]), lines);
+  // Four is not enough, and one held call in the window is enough to stay quiet.
+  const sb2 = sandbox();
+  sb2.opts.now = () => new Date(now);
+  plantLog(sb2, now, [[13, THROUGH], [10, THROUGH], [6, THROUGH], [3, THROUGH]]);
+  must(sb2.start('startup').stdout === '', 'warned at four');
+  const sb3 = sandbox();
+  sb3.opts.now = () => new Date(now);
+  plantLog(sb3, now, [[13, THROUGH], [10, THROUGH], [6, HELD_ROW], [3, THROUGH], [2, THROUGH], [1, THROUGH]]);
+  must(sb3.start('startup').stdout === '', 'warned with a held call in the window');
+});
+
+test('293: no warning in the normal case, at a resume, after a compression, or twice in a day', () => {
+  const now = Date.parse('2026-11-20T09:00:00Z');
+  const sb = sandbox();
+  sb.opts.now = () => new Date(now);
+  plantLog(sb, now, [[3, HELD_ROW], [2, THROUGH], [1, THROUGH]]);
+  must(sb.start('startup').stdout === '', 'warned in the normal case');
+  const bad = [[1, { event: 'start', reason: 'unreadable-input', line: 1 }]];
+  const sb2 = sandbox();
+  sb2.opts.now = () => new Date(now);
+  plantLog(sb2, now, bad);
+  must(sb2.start('resume').stdout === '', 'warned at a resume');
+  must(sb2.start('compact').stdout === '', 'warned after a compression');
+  must(sb2.start('startup').stdout !== '', 'did not warn at a fresh start');
+  plantLog(sb2, now, bad);
+  must(sb2.start('startup').stdout === '', 'warned a second time on the same day');
+  // The next day only rows not yet reported count: the second planted row is new, the first is not.
+  sb2.opts.now = () => new Date(now + 86400000);
+  const next = sb2.start('startup').stdout;
+  must(/\b1\b/.test(next), next);
+  must(sb2.start('startup').stdout === '', 'warned again with nothing new');
+});
+
+test('293: the warning names the count and the off switch', () => {
+  const now = Date.parse('2026-11-20T09:00:00Z');
+  const sb = sandbox();
+  sb.opts.now = () => new Date(now);
+  const row = { event: 'pre', decision: 'through', reason: 'unreadable-record', line: 1 };
+  plantLog(sb, now, [[3, row], [2, row], [1, row]]);
+  const line = sb.start('startup').stdout.trim();
+  must(/\b3\b/.test(line) && line.includes('.claude/settings.json') && line.includes('65'), line);
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

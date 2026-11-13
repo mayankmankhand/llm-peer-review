@@ -13,8 +13,9 @@
 // How Claude Code runs it (argv[2] is the mode; the hook's JSON arrives on stdin):
 //   pre    before an automatic compression (PreCompact, matcher auto). Exit 2 refuses it; Claude
 //          Code then tries again before the next call. Any other exit lets it through.
-//   start  every session start (SessionStart, no matcher). Notes how the stretch began. Prints
-//          nothing in this version.
+//   start  every session start (SessionStart, no matcher). Notes how the stretch began. Prints one
+//          line only in two cases: after a compression this script let through with a handoff
+//          note, and at a fresh start when it has stopped doing its job (the warning below).
 //
 // The rule, in order (each attempt gets one log row naming the line that decided it):
 //   1. the input, the session's record or its size cannot be read, or anything throws: through
@@ -44,10 +45,26 @@
 // never held: starting one ends the running stage. Words in a tool's output, a helper's row, a
 // pasted message, a command's arguments or a request blob row never start or end a stage.
 //
+// The handoff note. When a compression is let through after a stage's closing call and before the
+// next stage starts, the script writes a short note holding only what a script can know for
+// certain: the finished stage and its closing call word for word, the next stage, the newest plan
+// and its progress line, the newest exploration summary and review report, the branch, and the
+// saved checkpoints since the stage began. A part it cannot read is left out. The restart that
+// follows that compression prints one line naming the note and the next step; nothing is printed
+// after a compression at the limit, after one the owner typed, or twice for one compression.
+//
+// The warning. At a fresh session start, at most once a day, one line is printed when the log
+// holds a row not yet reported where the script could not read its input or the record, or when
+// the last 14 days hold at least 5 compressions let through and not one held call. The line gives
+// the count and the off switch. Only the log's last 2 MB are read, so the start stays quick.
+//
 // Where it writes, in the project it runs in (an ignored folder): reports/hold-compression/
 //   log.jsonl           one row per attempt and per session start
-//   sessions/<id>.json  each session's state: its place in the record, the running stage, how the
-//                       stretch began, the size at the stretch's first attempt
+//   sessions/<id>.json  each session's state: its place in the record, the running stage, the
+//                       last stage closed, how the stretch began, the size at the stretch's first
+//                       attempt, and a note waiting to be pointed to
+//   notes/              the handoff notes
+//   warned.json         the day of the last warning and how much of the log it covered
 //
 // Off switch: remove the hooks block from .claude/settings.json and set the percentage back to 65
 // (or undo the switch-on checkpoint). It takes effect at the next session start.
@@ -56,6 +73,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const HELD = new Set(['explore', 'create-plan', 'execute', 'review', 'document']);
 const NEVER_HELD = new Set(['merge', 'review-full', 'pair-debug', 'review-code', 'review-security', 'review-ux',
@@ -66,6 +84,16 @@ const PCT_NONE_FROM = 90;    // a percentage at or over this counts as no lowere
 const CHUNK = 16 * 1024 * 1024;
 const SIZE_WINDOWS = [256 * 1024, 4 * 1024 * 1024, 64 * 1024 * 1024];
 const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+// The stage that follows each one, as the handoff note and the printed line name it.
+const NEXT = {
+  explore: '/create-plan', 'create-plan': '/execute, once the owner says go', execute: '/review',
+  review: '/document', document: 'none, the cycle is complete',
+};
+const NOTE_MAX_AGE_MS = 15 * 60 * 1000; // a note older than this is never pointed to
+const WARN_DAYS = 14;
+const WARN_MIN_THROUGH = 5;
+const LOG_TAIL = 2 * 1024 * 1024;
+const OFF_SWITCH = 'To switch it off, remove the hooks block from .claude/settings.json and set CLAUDE_AUTOCOMPACT_PCT_OVERRIDE back to 65.';
 // The rule line each reason belongs to (see the header). A hold names no line.
 const LINE_OF = {
   'unreadable-input': 1, 'unreadable-record': 1, 'unreadable-size': 1, error: 1,
@@ -201,7 +229,7 @@ function closingOf(block) {
 // ---- the record reader ---------------------------------------------------------------------------------
 
 function newState() {
-  return { v: 1, transcript: null, offset: 0, stage: null, lastClosed: null, seen: false, firstSize: null };
+  return { v: 1, transcript: null, offset: 0, stage: null, lastClosed: null, seen: false, firstSize: null, pendingNote: null };
 }
 
 // Forget where the reader was, as for a record it has not read before.
@@ -399,6 +427,129 @@ function parseInput(text) {
   return input;
 }
 
+// ---- the handoff note --------------------------------------------------------------------------------
+
+// A path as the session sees it: relative to the project when it lies inside it, with / separators.
+function shown(projectDir, file) {
+  const rel = path.relative(projectDir, file);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel.split(path.sep).join('/') : file;
+}
+
+// The newest file in dir whose name matches re, as a path relative to the project, or null.
+function newest(projectDir, dir, re) {
+  try {
+    const abs = path.join(projectDir, dir);
+    let best = null, bestMs = -1;
+    for (const name of fs.readdirSync(abs)) {
+      if (!re.test(name)) continue;
+      const ms = fs.statSync(path.join(abs, name)).mtimeMs;
+      if (ms > bestMs) { best = name; bestMs = ms; }
+    }
+    return best ? dir + '/' + best : null;
+  } catch (e) { return null; }
+}
+
+function git(projectDir, args) {
+  try {
+    return execFileSync('git', args, { cwd: projectDir, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch (e) { return null; }
+}
+
+// A fenced block that holds text as it is, whatever backticks the text carries.
+function fenced(text) {
+  const runs = String(text).match(/`+/g) || [];
+  const fence = '`'.repeat(Math.max(3, ...runs.map((r) => r.length + 1)));
+  return fence + '\n' + text + '\n' + fence;
+}
+
+// Writes the note for a finished stage; returns its path as the session sees it.
+function writeNote(closed, opts) {
+  const p = opts.projectDir;
+  const out = [
+    '# Handoff note',
+    '',
+    'Written by scripts/hold-compression.js at ' + opts.now().toISOString() + ', when it let a compression through between stages. '
+      + 'It holds only what a script can know for certain; anything said only in chat is in Claude Code\'s own summary.',
+    '',
+    '- **Finished stage:** ' + closed.stage,
+    '- **Next stage:** ' + (NEXT[closed.stage] || 'unknown'),
+  ];
+  const plan = newest(p, 'plans', /^PLAN-.*\.md$/);
+  if (plan) {
+    let progress = null;
+    try { progress = (fs.readFileSync(path.join(p, plan), 'utf8').split('\n').find((l) => l.startsWith('**Overall Progress:**')) || '').trim() || null; } catch (e) { /* left out */ }
+    out.push('- **Newest plan:** ' + plan + (progress ? ' (' + progress + ')' : ''));
+  }
+  const explore = newest(p, 'reports/explore', /\.md$/);
+  if (explore) out.push('- **Newest exploration summary:** ' + explore);
+  const review = newest(p, 'reports', /^review-.*\.md$/);
+  if (review) out.push('- **Newest review report:** ' + review);
+  const branch = git(p, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (branch) out.push('- **Branch:** ' + branch);
+  const log = closed.startedAt ? git(p, ['log', '--since=' + closed.startedAt, '-n', '30', '--format=%h %s']) : null;
+  if (log !== null && closed.startedAt) {
+    out.push('- **Saved checkpoints since the stage began:**' + (log ? '' : ' none'));
+    for (const l of log ? log.split('\n') : []) out.push('  - ' + l);
+  }
+  out.push('', '## The closing call, word for word', '', 'Run it again when its result is not in view.', '', fenced(closed.call), '');
+  const dir = path.join(opts.dataDir, 'notes');
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = opts.now().toISOString().replace(/[:.]/g, '-');
+  for (let n = 1; ; n++) {
+    const file = path.join(dir, stamp + '-' + closed.stage + (n > 1 ? '-' + n : '') + '.md');
+    try { fs.writeFileSync(file, out.join('\n'), { flag: 'wx' }); return shown(p, file); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+  }
+}
+
+// The line printed at the restart after a compression this script let through with a note.
+function noteLine(note) {
+  return 'Handoff note: the ' + note.stage + ' stage finished before this compression, and its note is ' + note.path
+    + '. Next step: ' + (NEXT[note.stage] || 'unknown') + '. If the result of the ' + note.stage
+    + ' stage\'s closing call is not in view, run it again; the note has it word for word.\n';
+}
+
+// ---- the warning -------------------------------------------------------------------------------------
+
+// One line at a fresh start, at most once a day, when the script has stopped doing its job.
+function warning(opts) {
+  const logFile = path.join(opts.dataDir, 'log.jsonl');
+  const markFile = path.join(opts.dataDir, 'warned.json');
+  const now = opts.now();
+  const today = now.toISOString().slice(0, 10);
+  let mark = {};
+  try { mark = JSON.parse(fs.readFileSync(markFile, 'utf8')) || {}; } catch (e) { mark = {}; }
+  if (mark.day === today) return '';
+  let size;
+  try { size = fs.statSync(logFile).size; } catch (e) { return ''; }
+  const from = Math.max(0, size - LOG_TAIL);
+  const buf = Buffer.alloc(size - from);
+  const fd = fs.openSync(logFile, 'r');
+  try { fs.readSync(fd, buf, 0, buf.length, from); } finally { fs.closeSync(fd); }
+  const since = now.getTime() - WARN_DAYS * 86400000;
+  const reported = Number(mark.reported) || 0;
+  let at = from, unread = 0, firstUnread = null, through = 0, heldCalls = 0;
+  const lines = buf.toString('utf8').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const start = at;
+    at += Buffer.byteLength(line) + 1;
+    if (!line || (i === 0 && from > 0)) continue; // a cut first line
+    let r;
+    try { r = JSON.parse(line); } catch (e) { continue; }
+    if (start >= reported && LINE_OF[r.reason] === 1) { unread++; if (!firstUnread) firstUnread = String(r.t || '').slice(0, 10); }
+    if (r.event === 'pre' && Date.parse(r.t) >= since) {
+      if (r.decision === 'held') heldCalls++;
+      else if (r.decision === 'through') through++;
+    }
+  }
+  const parts = [];
+  if (unread) parts.push(unread + (unread === 1 ? ' call' : ' calls') + ' since ' + firstUnread + ' could not read the hook input or the session record');
+  if (through >= WARN_MIN_THROUGH && heldCalls === 0) parts.push('the last ' + WARN_DAYS + ' days hold ' + through + ' compressions let through and not one held');
+  if (!parts.length) return '';
+  fs.writeFileSync(markFile, JSON.stringify({ day: today, reported: size }));
+  return 'hold-compression warning: ' + parts.join('; and ') + ' (log: reports/hold-compression/log.jsonl). ' + OFF_SWITCH + '\n';
+}
+
 // ---- the two modes ----------------------------------------------------------------------------------
 
 function preCompact(text, opts) {
@@ -434,6 +585,16 @@ function preCompact(text, opts) {
   const verdict = decide(facts);
   if (state) {
     if (state.firstSize == null && verdict.limit !== undefined) state.firstSize = facts.size;
+    // Let through after a stage's closing call and before the next stage starts: write the note
+    // the next restart points to. Any other let-through leaves no note waiting.
+    if (!verdict.hold && !facts.error) {
+      state.pendingNote = null;
+      if (!state.stage && state.lastClosed) {
+        row.note = writeNote(state.lastClosed, opts);
+        state.pendingNote = { path: row.note, stage: state.lastClosed.stage, at: opts.now().toISOString() };
+        state.lastClosed = null;
+      }
+    }
     saveState(opts.dataDir, input.session_id, state);
   }
   Object.assign(row, {
@@ -464,10 +625,21 @@ function sessionStart(text, opts) {
   state.seen = input.source === 'startup' || input.source === 'clear' || input.source === 'compact';
   state.firstSize = null;
   if (input.source === 'clear') { state.stage = null; state.lastClosed = null; }
+  let stdout = '';
+  if (input.source === 'compact') {
+    // Point to the note only for the compression this script just let through with one.
+    const note = state.pendingNote;
+    if (note && opts.now().getTime() - Date.parse(note.at) <= NOTE_MAX_AGE_MS) { stdout = noteLine(note); row.printed = 'note'; }
+  }
+  state.pendingNote = null;
   saveState(opts.dataDir, input.session_id, state);
+  if (input.source === 'startup') {
+    stdout = warning(opts);
+    if (stdout) row.printed = 'warning';
+  }
   row.seen = state.seen;
   appendLog(opts.dataDir, row);
-  return { exit: 0, stdout: '', stderr: '' };
+  return { exit: 0, stdout, stderr: '' };
 }
 
 // Runs one hook call and never throws: on any error the compression goes through and nothing is
@@ -487,7 +659,7 @@ function run(mode, text, opts) {
 
 module.exports = {
   HELD, NEVER_HELD, LINE_OF, classify, splitParts, closingOf, newState, mayMatter, apply, scanText,
-  readRecord, readSize, readPct, limitFor, decide, isHelper, loadState, run,
+  readRecord, readSize, readPct, limitFor, decide, isHelper, loadState, writeNote, noteLine, warning, run,
 };
 
 if (require.main === module) {
