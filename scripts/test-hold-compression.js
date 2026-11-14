@@ -71,7 +71,9 @@ function sandbox(env) {
   const session = 'sess-' + uid();
   const record = path.join(dir, session + '.jsonl');
   fs.writeFileSync(record, '');
-  const opts = { env: env === undefined ? { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '50' } : env, projectDir: project, dataDir: path.join(project, 'reports', 'hold-compression') };
+  // Every record here is complete before the attempt, so the wait for Claude Code's pending write
+  // is switched off; the case that tests that wait turns it back on.
+  const opts = { env: env === undefined ? { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '50' } : env, projectDir: project, dataDir: path.join(project, 'reports', 'hold-compression'), settle: { floorMs: 0, quietMs: 0, capMs: 0 } };
   const logFile = path.join(opts.dataDir, 'log.jsonl');
   const rows = () => { try { return fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch (e) { return []; } };
   const sb = {
@@ -380,6 +382,28 @@ test('293: a second run reads only what is new', () => {
   fs.appendFileSync(sb.record, line.slice(40) + '\n');
   hc.readRecord(sb.record, state);
   must(state.stage && state.stage.name === 'document', state.stage);
+});
+
+// Claude Code runs the hook before it writes the latest call and tool result to the record, and
+// writes them while the hook runs, 41 to 82 ms in (the live fix round's measurement,
+// reports/checks/PLAN-issue-293/live/flush-probe-result.jsonl). The script waits for that write.
+test('293: a closing call the record gains just after the attempt starts is seen', () => {
+  const sb = sandbox();
+  sb.start('startup');
+  sb.add(typed('review'), assistant([bash('ls')], 500000));
+  must(held(sb.pre()), 'not held before the closing call');
+  const late = JSON.stringify(assistant([bash(CHAIN_REVIEW)], 510000)) + '\n';
+  const writer = require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => require("fs").appendFileSync(process.argv[1], process.argv[2]), 100)', sb.record, late], { stdio: 'ignore' });
+  const opts = Object.assign({}, sb.opts);
+  delete opts.settle; // the script's own wait, as Claude Code runs it
+  const before = sb.rows().length;
+  const started = Date.now();
+  const r = hc.run('pre', sb.input(), opts);
+  const took = Date.now() - started;
+  const row = sb.rows()[before];
+  writer.kill();
+  must(r.exit === 0 && row && row.reason === 'no-stage', { exit: r.exit, row, took });
+  must(took < 1500, 'the wait took ' + took + ' ms');
 });
 
 test('293: the size is read from the record\'s last main-session call', () => {

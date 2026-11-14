@@ -30,6 +30,9 @@
 //   6. no stage is running: through
 //   otherwise: held (exit 2).
 //
+// Before it reads the record, an attempt waits for Claude Code's pending write of the latest call
+// (see settle below): usually about 200 ms, never more than 1 second.
+//
 // The limit is worked out per session, never a fixed number: the size at the first attempt since
 // the last compression, divided by the percentage, is the session's window (never taken as more
 // than 1,000,000 tokens); the limit is 90% of that window.
@@ -328,6 +331,30 @@ function readRecord(file, state) {
   } finally { fs.closeSync(fd); }
 }
 
+// Claude Code runs this hook before it writes the latest call and its tool result to the record,
+// and writes them while the hook runs: 41 to 82 ms in, in one burst, in the live fix round's
+// measurement (reports/checks/PLAN-issue-293/live/flush-probe-result.jsonl). Read at once, the
+// record is one call behind, and after a stage's closing call the script would hold the first
+// attempt and let the next one through, after the next stage had already loaded. So it waits
+// until the record grows and then stays quiet, or until a floor passes with no growth, never
+// longer than a cap. Returns the time waited, in ms.
+const SETTLE = { floorMs: 300, quietMs: 120, capMs: 1000, stepMs: 20 };
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function settle(file, s) {
+  const started = Date.now();
+  const sizeNow = () => { try { return fs.statSync(file).size; } catch (e) { return -1; } };
+  let last = sizeNow();
+  let grewAt = null;
+  for (;;) {
+    const now = Date.now() - started;
+    if (now >= s.capMs || (grewAt === null ? now >= s.floorMs : now - grewAt >= s.quietMs)) break;
+    sleep(s.stepMs);
+    const size = sizeNow();
+    if (size !== last) { last = size; grewAt = Date.now() - started; }
+  }
+  return Date.now() - started;
+}
+
 // The size of the last main-session call, read from the end of the record: input plus cache-read
 // plus cache-creation tokens. Null when no such call is found in the record's last 64 MB.
 function readSize(file) {
@@ -572,6 +599,7 @@ function preCompact(text, opts) {
         resetReader(state);
         state.transcript = input.transcript_path;
       }
+      row.wait = settle(input.transcript_path, opts.settle);
       try { readRecord(input.transcript_path, state); } catch (e) { facts.error = 'unreadable-record'; }
       if (!facts.error) {
         try { facts.size = readSize(input.transcript_path); } catch (e) { facts.size = null; }
@@ -647,6 +675,7 @@ function sessionStart(text, opts) {
 function run(mode, text, opts) {
   const o = Object.assign({ env: {}, projectDir: process.cwd(), now: () => new Date() }, opts);
   if (!o.dataDir) o.dataDir = path.join(o.projectDir, 'reports', 'hold-compression');
+  o.settle = Object.assign({}, SETTLE, opts && opts.settle);
   try {
     if (mode === 'pre') return preCompact(text, o);
     if (mode === 'start') return sessionStart(text, o);
