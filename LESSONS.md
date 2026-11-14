@@ -574,3 +574,8 @@
 
 - **A PreCompact hook runs before Claude Code writes the newest record lines; wait for that write before reading.**
 - **Test a size limit with a turn that reads many files at once; the last call's size lags what is about to be sent.**
+
+## Issue 300 (the kept-text read)
+
+- **Before a standing review page lists the plan lens, check its open seeded findings came from this run's plan.**
+- **To call a script's private functions without editing it, compile its source at its own path with one export line added.**
