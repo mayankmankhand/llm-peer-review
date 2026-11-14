@@ -774,5 +774,21 @@ test('293: the warning names the count and the off switch', () => {
   must(/\b3\b/.test(line) && line.includes('.claude/settings.json') && line.includes('65'), line);
 });
 
+// ---- the switch-on (step 5) ----------------------------------------------------------------------
+
+// This repo's own settings file runs the script before an automatic compression and at every
+// session start, at 50 percent. The off switch (remove the hooks block, set the percentage back to
+// 65) turns this case red on purpose: switching off is a change to make in a checkpoint, with this
+// case removed or changed in the same one.
+test('293: the settings file switches the script on at 50 percent', () => {
+  const settings = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.claude', 'settings.json'), 'utf8'));
+  const command = (entry) => entry && Array.isArray(entry.hooks) && entry.hooks[0] && entry.hooks[0].command;
+  const pre = ((settings.hooks || {}).PreCompact || []).find((e) => /hold-compression\.js/.test(command(e) || ''));
+  const start = ((settings.hooks || {}).SessionStart || []).find((e) => /hold-compression\.js/.test(command(e) || ''));
+  must(pre && pre.matcher === 'auto' && command(pre) === 'node "$CLAUDE_PROJECT_DIR/scripts/hold-compression.js" pre', { pre });
+  must(start && start.matcher === undefined && command(start) === 'node "$CLAUDE_PROJECT_DIR/scripts/hold-compression.js" start', { start });
+  must(String((settings.env || {}).CLAUDE_AUTOCOMPACT_PCT_OVERRIDE) === '50', { env: settings.env });
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
