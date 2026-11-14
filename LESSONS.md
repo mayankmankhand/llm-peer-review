@@ -569,3 +569,8 @@
 
 - **Keep issue and release numbers out of the always-read rule files; the changelog holds that history.**
 - **A step that builds from the working tree first checks that the tree is on the branch its output describes.**
+
+## Issue 293 (the compression hold)
+
+- **A PreCompact hook runs before Claude Code writes the newest record lines; wait for that write before reading.**
+- **Test a size limit with a turn that reads many files at once; the last call's size lags what is about to be sent.**

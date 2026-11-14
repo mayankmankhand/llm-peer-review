@@ -2,6 +2,23 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**The troubleshooting page now covers a long session that skips or garbles a stage's last steps (#293).** When Claude Code compresses a long session partway through a review, a docs step or a build, the later steps of that stage's instructions are gone. The new entry says how to recover and how to keep it from happening.
+
+### Added
+
+- **A troubleshooting entry for a stage garbled by a compression (#293).** Under "Every install": if it already happened, open a new session and run that stage's command again; to keep it from happening, start a new session between cycles and leave the `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` setting alone.
+- **Maintainer only: the toolkit's own repository holds a compression until the running stage ends (#293).** A script switched on in this repository's settings refuses an automatic compression while a loop stage runs and lets it through at the stage's closing step, leaving a short handoff note; the compression point here moves from 65% to 50%. It passed a replay over saved sessions and two live practice sessions before it was switched on. It is not in the plugin: whether it ships is decided after a recount of real sessions, and six fixes the review found come first.
+
+### Upgrading
+
+- Nothing to do: this change is to the manual and to the toolkit's own repository; the plugin is unchanged.
+
+### Why
+
+A compression partway through a stage leaves the session with only the start of that stage's instructions, so its closing steps (the report, the hand-off, the docs) can be skipped or garbled. In the toolkit's own repository, compressing at 65% full made that about twice as common as Claude Code's default; the hold is a first attempt to move every compression to a stage boundary instead.
+
 ## v8.0.22 - Stopped Before It Leaves (2026-11-12)
 
 **The folder guard now stops a `cd` out of the project at the command that makes it, instead of one command later (#307).** Before, a command that started with `cd <full path> &&` ran wherever it pointed, Claude's shell stayed in that folder, and the guard stopped only the next command. Maintainer only: a test now ties the docs' upgrade-check counts to the conventions file (#306).
