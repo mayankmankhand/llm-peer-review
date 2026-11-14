@@ -10,6 +10,7 @@
 
 - **A troubleshooting entry for a stage garbled by a compression (#293).** Under "Every install": if it already happened, open a new session and run that stage's command again; to keep it from happening, start a new session between cycles and leave the `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` setting alone.
 - **Maintainer only: the toolkit's own repository holds a compression until the running stage ends (#293).** A script switched on in this repository's settings refuses an automatic compression while a loop stage runs and lets it through at the stage's closing step, leaving a short handoff note; the compression point here moves from 65% to 50%. It passed a replay over saved sessions and two live practice sessions before it was switched on. It is not in the plugin: whether it ships is decided after a recount of real sessions, and six fixes the review found come first.
+- **Maintainer only: the follow-up read of the kept-text path (#300).** The v8.0.19 notes said issue #300 would read how often a failed word-search recheck goes to the fresh verifier. In the 6 reviews since that change, all on a build that holds it, the 9 rechecks that could have sent a fix there all passed, so it never fired; across all saved reviews it would have fired at most once in 66. That says how rare the path is, not how often the verifier is right. The path stays as it is, and the read is recorded under the trial line in `docs/HITL-MAP.md`.
 
 ### Upgrading
 
