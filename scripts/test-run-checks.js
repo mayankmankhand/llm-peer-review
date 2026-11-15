@@ -1557,6 +1557,142 @@ section('17. a target that already meets its after expect fails the before run (
   check('the tally leaves a step whose target already passed unproved', s1.status === 'unproved' && /did not show its stated failure before/.test(String(s1.reasons)), one(JSON.stringify(s1)));
 });
 
+// --- 311. the lint warns about a test line that guesses its failure line -----
+// Four plans guessed what a failing suite would print and guessed wrong, so a
+// before run failed its own pattern and spent one of the step's three tries:
+// the pattern held no failure word, or ran the word straight into the case's
+// name where the suite prints a label (`reader: `), a dash or a `Failed:` list
+// first. The lint now lists a warning for each such test target, never a
+// problem, so no step is stopped by one. These cases are the rule's
+// definition: the patterns that must warn and must not. Each case first needs
+// `warnings` to be a list, so before the work every case fails by name.
+section('311 warn: the plan lint warns about a test line that guesses its failure line (issue #311)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const la = (body) => '(?=[\\s\\S]*' + body + ')';
+  const SAFE = '(?:FAIL|not ok)[^\\n]*';
+  // The fix both warnings name, as the warning prints it.
+  const FIX_RE = /\(\?:FAIL\|not ok\)\[\^\\n\]\*<name>/;
+  let planN = 0;
+  // Lint a plan of one step per row: a target running `npm test` (or the row's
+  // own command) with the row's before expect, or a guard when row.guard.
+  function lintOf(rows) {
+    const rel = 'plans/PLAN-warn-' + (++planN) + '.md';
+    const lines = ['## Tasks', ''];
+    rows.forEach((row, i) => {
+      lines.push('- [ ] 🟥 **Step ' + (i + 1) + ': Row ' + row.id + '** `[sequential]`');
+      const cmd = row.check || 'npm test';
+      if (row.guard) {
+        lines.push('  - Check: no target - a guard only');
+        lines.push('  - Check guard `' + row.id + '`: `' + cmd + '` - `' + JSON.stringify(row.before) + '`');
+      } else {
+        lines.push('  - Check target `' + row.id + '`: `' + cmd + '` - before `' + JSON.stringify(row.before) + '` - after `{"exit": 0}`');
+      }
+      lines.push('');
+    });
+    write(rel, lines.join('\n'));
+    const r = run(['--plan', rel, '--lint']);
+    const warnings = r.json && Array.isArray(r.json.warnings) ? r.json.warnings : null;
+    const forId = (id) => (warnings || []).filter((w) => w && w.id === id);
+    const counts = rows.map((row) => row.id + '=' + forId(row.id).length).join(' ');
+    return { r, warnings, forId, counts, rel };
+  }
+  const exactlyOne = (l, id, re) => l.forId(id).length === 1 && re.test(String(l.forId(id)[0].warning));
+
+  const noWord = lintOf([
+    { id: 'dash', before: { match: la('test-pricing\\.js: exit 1') + la('- the discount rounds down') } },
+    { id: 'bare', before: { match: 'the discount rounds down' } },
+    { id: 'pytest', check: 'pytest -q', before: { match: 'the discount rounds down' } },
+    { id: 'vitest', check: 'npx vitest run', before: { match: 'the discount rounds down' } },
+  ]);
+  check('311: lint warns on a test line with no failure word',
+    !!noWord.warnings && ['dash', 'bare', 'pytest', 'vitest'].every((id) => exactlyOne(noWord, id, /guesses the failure line/) && /no failure word/.test(noWord.forId(id)[0].warning) && FIX_RE.test(noWord.forId(id)[0].warning))
+      && noWord.forId('dash')[0].step === '1' && noWord.forId('dash')[0].line === 4,
+    one(noWord.counts + ' ' + JSON.stringify(noWord.warnings) + noWord.r.stderr));
+
+  const joined = lintOf([
+    { id: 'plus', before: { match: la('x\\.js: exit 1') + la('FAIL +the discount rounds down') } },
+    { id: 'group', before: { match: la('x\\.js: exit 1') + la('(?:FAIL +|- )the discount rounds down') } },
+    { id: 'two', before: { match: la(SAFE + 'the discount rounds down') + la('FAIL +the tax rounds up') } },
+  ]);
+  check('311: lint warns when a failure word runs straight into the name',
+    !!joined.warnings && ['plus', 'group', 'two'].every((id) => exactlyOne(joined, id, /no room on the line/) && FIX_RE.test(joined.forId(id)[0].warning)),
+    one(joined.counts + ' ' + JSON.stringify(joined.warnings) + joined.r.stderr));
+
+  const quiet = lintOf([
+    { id: 'safe', before: { match: la('x\\.js: exit 1') + la(SAFE + 'the discount rounds down') } },
+    { id: 'safe-two', before: { match: la('x\\.js: exit 1') + la(SAFE + 'the discount rounds down') + la(SAFE + 'the tax rounds up') } },
+    { id: 'name-first', before: { match: 'the discount rounds down[^\\n]*FAILED' } },
+    { id: 'grep', check: 'grep -c hello f.txt', before: { match: '- the discount rounds down' } },
+    { id: 'exit', before: { exit: 1 } },
+    { id: 'lint-run', check: 'npm run lint', before: { match: 'the discount rounds down' } },
+    { id: 'guard', guard: true, before: { match: 'x\\.js: exit 0' } },
+  ]);
+  check('311: lint is quiet on the safe shape and on lines that are not test lines',
+    !!quiet.warnings && quiet.warnings.length === 0 && !!quiet.r.json.summary && quiet.r.json.summary.warnings === 0 && quiet.r.json.summary.problems === 0,
+    one(quiet.counts + ' ' + JSON.stringify(quiet.warnings) + ' ' + JSON.stringify(quiet.r.json && quiet.r.json.problems) + quiet.r.stderr));
+
+  // A real phase run: a project whose `npm test` prints a FAIL line, and a
+  // step whose target draws a warning. The warning is listed; the step runs.
+  const wp = path.join(sandbox, 'warnproj');
+  fs.mkdirSync(path.join(wp, 'plans'), { recursive: true });
+  fs.mkdirSync(path.join(wp, 'reports'), { recursive: true });
+  fs.writeFileSync(path.join(wp, 'package.json'), JSON.stringify({ name: 'warnproj', version: '1.0.0', private: true, scripts: { test: 'node t.js' } }) + '\n');
+  fs.writeFileSync(path.join(wp, 't.js'), "console.log('  FAIL demo case - not built yet');\nprocess.exit(1);\n");
+  fs.writeFileSync(path.join(wp, 'plans', 'PLAN-warn.md'), ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: Warned** `[sequential]`',
+    '  - Check target `demo`: `npm test` - before `{"match": "FAIL demo case"}` - after `{"exit": 0}`',
+    ''].join('\n'));
+  const wLint = run(['--plan', 'plans/PLAN-warn.md', '--lint'], wp);
+  const wRun = run(['--plan', 'plans/PLAN-warn.md', '--step', '1', '--phase', 'before', '--timeout', '60000'], wp);
+  const wl = wLint.json && Array.isArray(wLint.json.warnings) ? wLint.json.warnings : null;
+  check('311: a warning is not a problem and stops no step',
+    !!wl && wl.length === 1 && wl[0].id === 'demo' && wLint.json.summary.warnings === 1 && wLint.json.summary.problems === 0 && wLint.json.problems.length === 0
+      && wRun.status === 0 && (wRun.byId.demo || {}).verdict === 'pass',
+    one(JSON.stringify(wl) + ' ' + wLint.stderr + ' | ' + wRun.stdout + wRun.stderr));
+
+  // The four recorded slips as first written, then each rewritten in the safe
+  // shape. Sources (plans/ is not tracked; each line is rebuilt from its
+  // plan's fixed line and the Outcomes note naming what it first was):
+  //   #244 PLAN-issue-244-245.md Step 2 `limit-drift`: expected `- paste limit:`
+  //   #265 PLAN-issue-265-266.md `bring-home-suite`: `FAIL +`, widened to `(?:FAIL +|- )`
+  //   #268 PLAN-issue-268.md `parity-suite`: `(?:FAIL +|- )`, widened for `Failed: `
+  //   #309 PLAN-issue-309-310.md `309-guard`: `(?:FAIL +|- )`, widened for `reader: `
+  const slips = [
+    ['244', 'test-prompt-parity', '- ', 'paste limit: upgrade-audit'],
+    ['265', 'test-merge-check', 'FAIL +', 'bring-home: a record the main copy lacks is copied'],
+    ['268', 'test-prompt-parity', '(?:FAIL +|- )', 'the seed README lists the nine files under a heading that counts them'],
+    ['309', 'test-push-guard', '(?:FAIL +|- )', '309: a single-quoted folder with a space is a standard push'],
+  ];
+  const slipRows = [];
+  for (const [n, suite, prefix, name] of slips) {
+    const exit = la(suite + '\\.js: exit 1');
+    slipRows.push({ id: 'slip-' + n, check: 'npm test -- --suites scripts/' + suite + '.js', before: { match: exit + la(prefix + name) } });
+    slipRows.push({ id: 'safe-' + n, check: 'npm test -- --suites scripts/' + suite + '.js', before: { match: exit + la(SAFE + name) } });
+  }
+  const slipLint = lintOf(slipRows);
+  check('311: the four recorded slips each draw a warning and their rewrites draw none',
+    !!slipLint.warnings && slips.every(([n]) => slipLint.forId('slip-' + n).length === 1 && slipLint.forId('safe-' + n).length === 0)
+      && /no failure word/.test(String((slipLint.forId('slip-244')[0] || {}).warning))
+      && ['265', '268', '309'].every((n) => /no room on the line/.test(String((slipLint.forId('slip-' + n)[0] || {}).warning))),
+    one(slipLint.counts + ' ' + slipLint.r.stderr));
+
+  const named = lintOf([
+    { id: 'safe-named', before: { match: la('x\\.js: exit 1') + la(SAFE + 'a failing suite shows every FAIL line') } },
+    { id: 'joined-named', before: { match: la('x\\.js: exit 1') + la('FAIL +a failing suite shows every FAIL line') } },
+  ]);
+  check('311: a case name that holds a failure word draws no warning of its own',
+    !!named.warnings && named.forId('safe-named').length === 0 && named.forId('joined-named').length === 1 && named.warnings.length === 1,
+    one(named.counts + ' ' + JSON.stringify(named.warnings) + named.r.stderr));
+
+  const across = lintOf([
+    { id: 'across', before: { match: 'FAIL[\\s\\S]*the discount rounds down' } },
+    { id: 'apart', before: { match: la('FAIL') + la('the discount rounds down') } },
+  ]);
+  check('311: a word and a name joined across lines draw a warning and in separate lookaheads they do not',
+    !!across.warnings && exactlyOne(across, 'across', /no room on the line/) && across.forId('apart').length === 0,
+    one(across.counts + ' ' + JSON.stringify(across.warnings) + across.r.stderr));
+});
+
 // --- 290. an after run its before record cannot prove is refused (issue #290) -
 // A step's before run could be skipped with nothing noticing until the tally
 // at the hand-off to review, when the step's work was committed and the step

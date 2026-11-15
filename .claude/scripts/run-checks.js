@@ -123,7 +123,14 @@
 //             used, so a root-level file such as package.json is not one; a
 //             path that resolves outside the project counts as missing. The
 //             list is advisory, never a problem: a step may name a file it is
-//             about to create.
+//             about to create. And it prints warnings (issue #311), each
+//             { step, line, id, warning }, counted in summary.warnings: a
+//             test target (its command runs a test suite, its before expect is
+//             a match) whose pattern guesses the failure line, because it holds
+//             no failure word (FAIL, FAILED, not ok, a cross mark) or runs its
+//             first one straight into the next text with no room on the line
+//             ([^\n]* or .*). A warning is never a problem, so it stops no
+//             step; see lintWarnings.
 //   --phase   runs one step's checks with that phase's expects. It refuses
 //             (nothing runs) while that step, or the plan outside its steps,
 //             has a lint problem, re-runs a failure once (the --rerun-failures
@@ -1429,7 +1436,8 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + '  exit code         0 when the checks file validated (verdicts are the result); 1 for a malformed file or a refused --out\n'
   + 'plan mode: node run-checks.js --plan <plan.md> (--lint | --tally | --step <N> --phase before|after [--timeout <ms>])\n'
   + '  --lint            every check line in the plan that would not run, as problems; and missingPaths,\n'
-  + '                    each file path the plan names that is not in the project, with its line (advisory)\n'
+  + '                    each file path the plan names that is not in the project, with its line (advisory); and\n'
+  + '                    warnings, each test target whose before pattern guesses the failure line (never a problem)\n'
   + '  --step --phase    run one step\'s checks with that phase\'s expects into reports/checks/<plan>/step-<N>/<phase>/;\n'
   + '                    an after run is refused, nothing run, when the step\'s before record cannot prove it;\n'
   + '                    a green after run also prints next: the next step\'s before command\n'
@@ -2168,6 +2176,183 @@ function lintStep(st, root, env) {
   return problems;
 }
 
+// ---------------------------------------------------------------------------
+// Lint warnings (issue #311). A test target's before pattern says in advance
+// what the failing suite will print, and four plans guessed the line wrong:
+// the pattern held no failure word, or ran the word straight into the case's
+// name where the suite prints a label, a dash or a path first, so the before
+// run failed its own pattern and spent one of the step's three tries. --lint
+// lists such a target as a warning, never a problem: a phase run reads
+// problems only, so a warning stops no step.
+// ---------------------------------------------------------------------------
+
+// Whether one segment's words run a test suite: the test forms the guard
+// allows (npmRule and the others above), without their lint, typecheck, vet,
+// check and clippy forms, which print no failed case.
+const TEST_NPX = new Set(['jest', 'vitest', 'mocha', 'ava', 'tap', 'playwright']);
+function isTestRun(words) {
+  const [cmd, a, b, c, d] = words;
+  switch (cmd) {
+    case 'npm': return a === 'test' || (a === 'run' && /^test(:[A-Za-z0-9_-]+)?$/.test(b || ''));
+    case 'yarn': case 'pnpm': return a === 'test' || (a === 'run' && b === 'test');
+    case 'bun': return a === 'test';
+    case 'npx': return TEST_NPX.has(a);
+    case 'pytest': return true;
+    case 'python': case 'python3': return a === '-m' && b === 'pytest';
+    case 'uv': case 'poetry': return a === 'run' && (b === 'pytest' || (b === 'python' && c === '-m' && d === 'pytest'));
+    case 'go': case 'cargo': case 'make': return a === 'test';
+    default: return false;
+  }
+}
+
+// The length of the failure word that starts at `i` in a regex source, or 0.
+// A failure word is FAIL or FAILED in capitals as a whole word (a following
+// (?:ED)? counts with it), `not ok` (its blank may be written \s, with a
+// quantifier), or one of the cross marks test tools print, as the character
+// or its \u escape. A lowercase failed, failing or failure is not one, so a
+// case name such as "lint warns on a test line with no failure word" holds none.
+const CROSS_MARKS = ['✕', '✗', '×', '✖', '\\u2715', '\\u2717', '\\u00d7', '\\u00D7', '\\u2716'];
+function failureWordAt(src, i) {
+  // A word starts after a non-word character, or after an escape such as \b or \s.
+  const prev = src[i - 1];
+  const boundary = i === 0 || !/[A-Za-z0-9_]/.test(prev) || src[i - 2] === '\\';
+  const endsWord = (j) => j >= src.length || !/[A-Za-z0-9_]/.test(src[j]);
+  if (boundary && src.startsWith('FAIL', i)) {
+    let j = i + 4;
+    if (src.startsWith('ED', j)) j += 2;
+    else if (src.startsWith('(?:ED)?', j)) j += 7;
+    return endsWord(j) ? j - i : 0;
+  }
+  if (boundary) {
+    const m = /^not(?: |\\s)[+*?]?ok/.exec(src.slice(i));
+    if (m && endsWord(i + m[0].length)) return m[0].length;
+  }
+  for (const x of CROSS_MARKS) if (src.startsWith(x, i)) return x.length;
+  return 0;
+}
+
+// The index just past the regex atom at `i`: an escape (\uXXXX and \xXX
+// whole), a character class, or one character.
+function atomEnd(src, i) {
+  if (src[i] === '\\') {
+    if (src[i + 1] === 'u' && /^[0-9A-Fa-f]{4}$/.test(src.slice(i + 2, i + 6))) return i + 6;
+    if (src[i + 1] === 'x' && /^[0-9A-Fa-f]{2}$/.test(src.slice(i + 2, i + 4))) return i + 4;
+    return i + 2;
+  }
+  if (src[i] === '[') {
+    let j = i + 1;
+    if (src[j] === '^') j++;
+    if (src[j] === ']') j++;   // a ] first in a class is a literal
+    for (; j < src.length && src[j] !== ']'; j++) if (src[j] === '\\') j++;
+    return j + 1;
+  }
+  return i + 1;
+}
+
+// The parts a pattern is read as: the body of each lookahead that opens
+// (?=[\s\S]*, and what is left outside them; the whole pattern when it has none.
+const ANYWHERE = '(?=[\\s\\S]*';
+function patternParts(src) {
+  const parts = [];
+  let rest = '';
+  let i = 0;
+  while (i < src.length) {
+    if (src.startsWith(ANYWHERE, i)) {
+      let depth = 1;
+      let j = i + ANYWHERE.length;
+      while (j < src.length && depth > 0) {
+        if (src[j] === '(') depth++;
+        else if (src[j] === ')') depth--;
+        j = depth > 0 ? atomEnd(src, j) : j;
+      }
+      parts.push(src.slice(i + ANYWHERE.length, j));
+      i = j + 1;
+    } else {
+      const j = atomEnd(src, i);
+      rest += src.slice(i, j);
+      i = j;
+    }
+  }
+  if (rest !== '') parts.push(rest);
+  return parts;
+}
+
+// One quantifier at `j` (?, +, *, {n,m}, each with a lazy ?), skipped.
+function skipQuantifier(src, j) {
+  const m = /^(?:[?+*]|\{\d+(?:,\d*)?\})\??/.exec(src.slice(j));
+  return m ? j + m[0].length : j;
+}
+
+// For one part: 'none' when it holds no failure word; 'joined' with the text
+// that follows when its first failure word runs into text with no room on the
+// same line; 'ok' otherwise. Only the first failure word counts, so a case
+// name that holds one (`a failing suite shows every FAIL line`) is not read as
+// a second. From that word the reading steps over the rest of the group of
+// alternatives it sits in, a ?, blanks, ` +`, `\s+`, `\s*` and a colon; next
+// must come room on the same line ([^\n]* or [^\n]+, .* or .+) or the part's
+// end. [\s\S]* is not room on the same line.
+function partShape(src) {
+  const open = [];
+  for (let i = 0; i < src.length;) {
+    if (src[i] === '(') { open.push(i); i++; continue; }
+    if (src[i] === ')') { open.pop(); i++; continue; }
+    if (src[i] === '\\' || src[i] === '[') {
+      const len = src[i] === '\\' ? failureWordAt(src, i) : 0;   // a \u cross mark
+      if (!len) { i = atomEnd(src, i); continue; }
+    }
+    const len = failureWordAt(src, i);
+    if (!len) { i++; continue; }
+    let j = i + len;
+    if (open.length) {
+      // The rest of the group the word sits in: to its unmatched ).
+      for (let depth = 0; j < src.length; j = atomEnd(src, j)) {
+        if (src[j] === '(') depth++;
+        else if (src[j] === ')') { if (depth === 0) break; depth--; }
+      }
+      j = skipQuantifier(src, j + 1);
+    }
+    for (;;) {
+      if (src.startsWith('\\s', j)) j = skipQuantifier(src, j + 2);
+      else if (src[j] === ' ' || src[j] === ':' || src[j] === ')') j = skipQuantifier(src, j + 1);
+      else if (src[j] === '?') j++;
+      else break;
+    }
+    if (j >= src.length || /^(?:\[\^(?:\\n|\\r\\n|\\n\\r)\]|\.)[*+]/.test(src.slice(j))) return { shape: 'ok' };
+    return { shape: 'joined', next: src.slice(j, j + 30) };
+  }
+  return { shape: 'none' };
+}
+
+// The fix both warnings name. It shows the word first only as an example: the
+// order is the tool's, as /create-plan's "The stated failure" says.
+const WARN_FIX = "put the word the test tool prints for a failed case and the case's name on one line with room between them, "
+  + 'in the order the tool prints them, for example (?:FAIL|not ok)[^\\n]*<name>';
+
+// The warnings for one step: at most one per test target, each { line, id,
+// warning }. A target is read when its command runs a test suite and its
+// before expect is a valid match; a guard never is, as it states no failure.
+function lintWarnings(st) {
+  const warnings = [];
+  for (const t of st.targets) {
+    if (t.before.error || expectProblem(t.before)) continue;
+    const v = t.before.value;
+    if (typeof v.match !== 'string') continue;
+    const parsed = tokenize(t.check);
+    if (parsed.error || !parsed.segments.some(isTestRun)) continue;
+    const shapes = patternParts(v.match).map(partShape);
+    const joined = shapes.find((s) => s.shape === 'joined');
+    let why = null;
+    if (shapes.every((s) => s.shape === 'none')) {
+      why = 'its before pattern holds no failure word (FAIL, FAILED, not ok or a cross mark), so a passing line that carries the same name could satisfy it';
+    } else if (joined) {
+      why = 'its before pattern runs the failure word straight into ' + JSON.stringify(joined.next)
+        + ' with no room on the line, where a test tool may print a label, a number or a path';
+    }
+    if (why) warnings.push({ line: t.line, id: t.id, warning: "'" + t.id + "' guesses the failure line: " + why + '; ' + WARN_FIX });
+  }
+  return warnings;
+}
+
 // The plan, read through realpath and fenced to the project: { text, base, rel }.
 function readPlan(planArg, cwd) {
   const root = realpathOrNull(cwd);
@@ -2222,13 +2407,18 @@ function lintPlan(opts, cwd) {
   const parsed = parsePlan(plan.text);
   const env = checkEnv();
   const problems = parsed.problems.map((p) => ({ step: null, line: p.line, problem: p.problem }));
+  // Warnings (issue #311) are a list of their own: a phase run reads problems
+  // only, so a warning never stops a step.
+  const warnings = [];
   if (!parsed.steps.length) problems.push({ step: null, line: null, problem: 'no step lines found (a step line reads - [ ] 🟥 **Step N: name**)' });
   const list = parsed.steps.map((st) => {
     for (const p of lintStep(st, plan.root, env)) problems.push({ step: st.step, line: p.line, problem: p.problem });
+    for (const w of lintWarnings(st)) warnings.push({ step: st.step, line: w.line, id: w.id, warning: w.warning });
     return { step: st.step, name: st.name, targets: st.targets.map((t) => t.id), guards: st.guards.map((g) => g.id), noTarget: st.noTarget };
   });
   problems.sort((x, y) => (x.line === null ? Infinity : x.line) - (y.line === null ? Infinity : y.line));
-  return { plan: plan.rel, steps: list, problems, summary: { steps: parsed.steps.length, problems: problems.length },
+  return { plan: plan.rel, steps: list, problems, warnings,
+    summary: { steps: parsed.steps.length, problems: problems.length, warnings: warnings.length },
     missingPaths: missingPlanPaths(plan.text, plan.root) };
 }
 
