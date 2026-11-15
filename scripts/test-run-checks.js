@@ -1691,6 +1691,20 @@ section('311 warn: the plan lint warns about a test line that guesses its failur
   check('311: a word and a name joined across lines draw a warning and in separate lookaheads they do not',
     !!across.warnings && exactlyOne(across, 'across', /no room on the line/) && across.forId('apart').length === 0,
     one(across.counts + ' ' + JSON.stringify(across.warnings) + across.r.stderr));
+
+  // The plan command's own example is what plans copy: a warning that fired on
+  // it would fire on every plan. Read the first {"match": ...} example in its
+  // "The stated failure" paragraph and lint it as an npm test target.
+  let example = null;
+  let exampleWhy = 'no "The stated failure" paragraph in create-plan.md';
+  const para = fs.readFileSync(path.join(REPO, '.claude', 'commands', 'create-plan.md'), 'utf8').split('\n').find((l) => l.startsWith('**The stated failure.**'));
+  const span = para ? /`(\{"match": "(?:[^"\\]|\\.)*"\})`/.exec(para) : null;
+  if (para) exampleWhy = span ? '' : 'no {"match": ...} example in the paragraph';
+  if (span) { try { example = JSON.parse(span[1]); } catch (e) { exampleWhy = 'the example is not JSON: ' + e.message; } }
+  const ex = example ? lintOf([{ id: 'example', before: example }]) : null;
+  check('311: the example test line in the plan command draws no warning',
+    !!ex && !!ex.warnings && ex.warnings.length === 0 && ex.r.json.summary.problems === 0,
+    one(exampleWhy || (ex.counts + ' ' + JSON.stringify(ex.warnings) + ex.r.stderr)));
 });
 
 // --- 290. an after run its before record cannot prove is refused (issue #290) -

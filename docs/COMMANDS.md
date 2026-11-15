@@ -77,7 +77,7 @@ Pick the target that shows the change:
 | Old vs new | A step replaces something | Both versions run on the same inputs and the results are compared |
 | Must and must-not lines | Text or a prompt changes | A count of a line the edit adds (0 before, 1 or more after) or removes (the reverse), plus a guard on each sentence the edit must keep |
 
-**The stated failure.** A target's result before the work is written down in advance, and only the missing behavior can produce it: for a test, the new case's name in the suite's failure list, not just "the tests fail", because some other failure would satisfy that too. A crash or a missing file is not the stated failure: `/execute` adds the smallest stub, such as an empty function, and runs the check again.
+**The stated failure.** A target's result before the work is written down in advance, and only the missing behavior can produce it: for a test, the new case's name on a line that also holds the test tool's failure word, not just "the tests fail", because some other failure would satisfy that too. A crash or a missing file is not the stated failure: `/execute` adds the smallest stub, such as an empty function, and runs the check again. The plan check warns about a test line that leaves the failure word out, or leaves no room between the word and the name.
 
 **Why a check that already passes proves nothing.** A target that passes before the work would pass whether or not the work was done. So an absence check (a count of 0 or a no-match after the work) fits only a step that removes something, while a count of 0 before the work, for a line the step adds, is a must line's stated failure. When a target passes before the work, `/execute` fixes the check or its stated reason, never the work.
 
