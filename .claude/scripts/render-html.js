@@ -1773,9 +1773,66 @@ function markCycleChanged(data, prior, branch) {
 // the same way. Hyphenated tokens are otherwise matched whole on purpose:
 // `security-audit` must never be resolved by a `security` run
 // (security-audit/SKILL.md).
+//
+// A plan run re-reads only its own plan, though (issue #310): the #300 review
+// would have closed three findings the #293 plan still owed by listing the
+// plan lens. So the payload names the plan it seeded from in `mustCheckPlan`,
+// the renderer stamps that path on each must-check finding the payload brings
+// (`seededFrom`, set here and never taken from a payload), and carryForward
+// closes a carried must-check finding only for the plan it belongs to.
 const SEEDED_SPECIALISTS = ['plan-critic', 'design-critic', 'interaction-pass', 'check-first'];
 function isSeeded(specs) {
   return specs.some(function (sp) { return SEEDED_SPECIALISTS.indexOf(sp) !== -1; });
+}
+
+// The payload's `mustCheckPlan` as { rel, text }: its path from the copy that
+// holds it, with forward slashes (the stamp), and the plan's text (the Source
+// line test). Null, with a note, when it is absent, outside the project or
+// unreadable: a plan the renderer cannot read closes nothing, so every
+// must-check finding is carried as still open. The key on the page is
+// rewritten to `rel`, or dropped when it cannot be used.
+function mustCheckPlanOf(data) {
+  if (data.mustCheckPlan === undefined || data.mustCheckPlan === null) return null;
+  const raw = typeof data.mustCheckPlan === 'string' ? data.mustCheckPlan.trim() : '';
+  delete data.mustCheckPlan;
+  const abs = raw ? path.resolve(WORK_ROOT, raw) : '';
+  let why = null;
+  let text = null;
+  if (!raw) why = 'is not a path';
+  else if (!underRepoRoot(abs)) why = 'names a file outside the project';
+  else {
+    try { text = fs.readFileSync(abs, 'utf-8').replace(/\r\n/g, '\n'); } catch (e) { why = 'names a file that could not be read'; }
+  }
+  if (why) {
+    reviewNotes.push('mustCheckPlan ' + why + ', so it is treated as absent: no must-check finding is stamped or closed by this run');
+    return null;
+  }
+  const root = underRoot(abs, WORK_ROOT) ? WORK_ROOT : REPO_ROOT;
+  const rel = path.relative(path.resolve(root), abs).split(path.sep).join('/');
+  data.mustCheckPlan = rel;
+  return { rel: rel, text: text };
+}
+
+// The finding's Source row, the must-check line as the plan holds it, or ''.
+function sourceLineOf(f) {
+  const row = (Array.isArray(f.fields) ? f.fields : []).find(function (r) {
+    return r && typeof r.label === 'string' && /^source$/i.test(r.label.trim()) && typeof r.value === 'string';
+  });
+  return row ? row.value.trim() : '';
+}
+
+// Why a carried must-check finding stays open, or null when this run closes
+// it: only when the plan lens ran, the run names its plan, and the finding
+// belongs to that plan (its stamp names it, or the plan holds its Source line
+// word for word, which is how a follow-up plan takes over an older plan's
+// open lines). No other lens closes one, merged or not.
+function mustCheckReason(f, planRan, plan) {
+  if (!planRan) return 'mcLens';
+  if (!plan) return 'mcNoPlan';
+  if (f.seededFrom === plan.rel) return null;
+  const source = sourceLineOf(f);
+  if (source && plan.text.indexOf(source) !== -1) return null;
+  return 'mcOther';
 }
 
 // Which lenses a finding belongs to: its `specialist` ("code", "code, ux",
@@ -1819,18 +1876,21 @@ function openFindingsWithLabels(data) {
 // `reviewedFiles`, and a finding from a lens that ran is resolved only when its
 // file is in that list. One on an unreviewed file, or with no file to match,
 // is carried like one from a lens that did not run. Seeded must-check findings
-// are the exception while the plan lens runs: they are re-read from the plan
-// every orchestrated run, file or no file. So is a finding with no file on a full
-// check: it looks at the project rather than a list of files and raises the finding
-// again if it still holds, so nothing else would ever end it. `completeness` and
-// `operations` are the rows only a full check sets. A payload with `lenses` and no
+// follow their own rule, file or no file (mustCheckReason above, issue #310):
+// they close only when the plan lens runs and the run names (`plan`, from
+// mustCheckPlanOf) the plan they belong to; any other run carries them. A
+// finding with no file on a full check is the other exception: it looks at the
+// project rather than a list of files and raises the finding again if it still
+// holds, so nothing else would ever end it. `completeness` and `operations` are
+// the rows only a full check sets. A payload with `lenses` and no
 // `reviewedFiles` (a project's own command written before the key) resolves by
 // lens alone, as before, and says so on stderr.
-function carryForward(data, prior) {
+function carryForward(data, prior, plan) {
   if (!Array.isArray(data.lenses) || !data.lenses.length) return;
   const lenses = data.lenses.map(function (l) { return String(l).toLowerCase().trim(); }).filter(Boolean);
   const scoped = Array.isArray(data.reviewedFiles);
   const fullCheck = lenses.indexOf('completeness') !== -1 || lenses.indexOf('operations') !== -1;
+  const planRan = lenses.indexOf('plan') !== -1;
   // Said whenever the list is missing, before the previous page is even read:
   // this note is how a caller's missing list shows, so it cannot wait for a
   // finding that happens to resolve (review of the #219 cycle, R4).
@@ -1849,18 +1909,24 @@ function carryForward(data, prior) {
   openFindings(data).forEach(function (f) { present[stableFindingKey(f)] = true; });
 
   const carried = [];
-  const why = { lens: 0, file: 0, nofile: 0 };
+  const why = { lens: 0, file: 0, nofile: 0, mcLens: 0, mcNoPlan: 0, mcOther: 0 };
   openFindingsWithLabels(prior.data).forEach(function (item) {
     const specs = specialistsOf(item.f, item.label);
     const key = stableFindingKey(item.f);
     // A finding no lens can be read from is carried rather than resolved: the
     // page never reports as done what it cannot attribute to a lens that ran.
-    const ran = specs.some(function (sp) { return lenses.indexOf(sp) !== -1; });
-    let reason = ran ? null : 'lens';
-    if (ran && scoped && !(isSeeded(specs) && lenses.indexOf('plan') !== -1)) {
-      const rel = item.f.file && typeof item.f.file.relPath === 'string' ? normRelPath(item.f.file.relPath) : '';
-      if (!rel) { if (!fullCheck) reason = 'nofile'; }
-      else if (!reviewed[rel]) reason = 'file';
+    // The copy below keeps the finding's own seededFrom, older stamp or none:
+    // a run that carries a finding never stamps it.
+    let reason = null;
+    if (isSeeded(specs)) reason = mustCheckReason(item.f, planRan, plan);
+    else {
+      const ran = specs.some(function (sp) { return lenses.indexOf(sp) !== -1; });
+      reason = ran ? null : 'lens';
+      if (ran && scoped) {
+        const rel = item.f.file && typeof item.f.file.relPath === 'string' ? normRelPath(item.f.file.relPath) : '';
+        if (!rel) { if (!fullCheck) reason = 'nofile'; }
+        else if (!reviewed[rel]) reason = 'file';
+      }
     }
     if (!reason) return;
     if (present[key]) return;
@@ -1907,6 +1973,9 @@ function carryForward(data, prior) {
   if (why.lens) reasons.push(why.lens + ' from lenses this run did not check (' + lenses.join(', ') + ' ran)');
   if (why.file) reasons.push(why.file + ' on files it did not review');
   if (why.nofile) reasons.push(why.nofile + ' with no file to match against reviewedFiles');
+  if (why.mcLens) reasons.push(why.mcLens + ' must-check finding(s), which only the plan check closes, and it did not run');
+  if (why.mcNoPlan) reasons.push(why.mcNoPlan + ' must-check finding(s), because the payload names no mustCheckPlan, and only a run that names the plan a finding came from closes it');
+  if (why.mcOther) reasons.push(why.mcOther + ' must-check finding(s) from another plan than ' + plan.rel);
   reviewNotes.push('carried ' + carried.length + ' open finding(s) forward: ' + reasons.join(', '));
 }
 
@@ -1981,9 +2050,10 @@ if (opts.shell === 'review') {
   // Three flags are the renderer's to set and never the payload's. A payload
   // that arrives carrying them is stripped before anything reads them, or
   // `carried: true` beside an inline stdout would walk straight past the
-  // receipt guard.
+  // receipt guard. The must-check stamp `seededFrom` (issue #310) is the
+  // renderer's too, set below from mustCheckPlan alone.
   openFindings(parsed).concat(auditedFindings(parsed)).forEach(function (f) {
-    delete f.carried; delete f.isNew; delete f.demoted;
+    delete f.carried; delete f.isNew; delete f.demoted; delete f.seededFrom;
   });
   // The shell lets `specialist` default to the group label, but the contract
   // pass collapses the groups into one unlabeled list before the page is
@@ -1996,6 +2066,15 @@ if (opts.shell === 'review') {
       if (f && typeof f === 'object' && !f.specialist) f.specialist = g.label.trim();
     });
   });
+  // Stamp this run's plan on each must-check finding the payload itself
+  // brings (issue #310), after the labels above so a group label counts. A
+  // finding carried from the previous page is added later and keeps its own.
+  const mustCheckPlan = mustCheckPlanOf(parsed);
+  if (mustCheckPlan) {
+    openFindings(parsed).forEach(function (f) {
+      if (isSeeded(specialistsOf(f, ''))) f.seededFrom = mustCheckPlan.rel;
+    });
+  }
   // In stable mode the output path is deterministic, so the page this run is
   // about to replace can be read before it is overwritten. That is the whole
   // memory mechanism: the previous page IS the record of what the reader last
@@ -2005,7 +2084,7 @@ if (opts.shell === 'review') {
   let prior = { state: 'none' };
   if (opts.stable) {
     prior = priorPayload(path.join(pageDir, safeName + '.html'));
-    carryForward(parsed, prior);
+    carryForward(parsed, prior, mustCheckPlan);
   }
   applyReviewContract(parsed);
   if (opts.stable) {

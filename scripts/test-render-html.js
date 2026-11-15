@@ -1655,20 +1655,85 @@ function issue162Tests() {
 
   // The seeded must-check items (review.md Phase 3) are re-read from the plan
   // on every orchestrated run, so the plan lens running is the evidence, file
-  // or no file. Before #219 their tokens never matched any lens.
+  // or no file. Before #219 their tokens never matched any lens. Since #310
+  // that holds only for the plan the run names in mustCheckPlan: the renderer
+  // stamps each must-check finding a payload brings with it (seededFrom), and
+  // a carried one closes only when it belongs to the plan the run names.
+  const plansDir = path.join(dir, 'plans');
+  fs.mkdirSync(plansDir, { recursive: true });
+  const LINE_A = '- [check] a-1 (step 2): passes, but its record shows the A gap still open.';
+  fs.writeFileSync(path.join(plansDir, 'own.md'), '# Own\n\n## Must-check for review\n- [plan] Step: the own plan line.\n', 'utf-8');
+  fs.writeFileSync(path.join(plansDir, 'A.md'), '# A\n\n## Must-check for review\n' + LINE_A + '\n', 'utf-8');
+  fs.writeFileSync(path.join(plansDir, 'B.md'), '# B\n\n## Must-check for review\n- [plan] Step: a B line only.\n', 'utf-8');
+  fs.writeFileSync(path.join(plansDir, 'C.md'), '# C, the follow-up to A\n\n## Must-check for review\n' + LINE_A + '\n', 'utf-8');
+  function mustCheck(id, specialist, extra) {
+    return finding(id, Object.assign({ specialist: specialist, fields: [{ label: 'Source', value: LINE_A }] }, extra || {}));
+  }
+  const planRun = function (plan, extra) { return Object.assign({ lenses: ['plan'], reviewedFiles: [] }, plan ? { mustCheckPlan: plan } : {}, extra || {}); };
   ['plan-critic', 'design-critic', 'interaction-pass'].forEach(function (tok) {
-    run('seeded-' + tok, page([finding('R1', { specialist: tok })]));
-    const sp = island(run('seeded-' + tok, page([], { lenses: ['plan'], reviewedFiles: [] })).html);
-    check('a ' + tok + ' finding resolves when the plan lens runs (#219)',
+    run('seeded-' + tok, page([finding('R1', { specialist: tok })], { mustCheckPlan: 'plans/own.md' }));
+    const sp = island(run('seeded-' + tok, page([], planRun('plans/own.md'))).html);
+    check('a ' + tok + ' finding resolves when the plan lens runs on its own plan (#219, #310)',
       finds(sp).length === 0 && /1 resolved/.test(sp.sinceLast || ''), sp.sinceLast);
   });
   // The findings /review seeds from a plan's tally and its [check] lines
   // (#231) carry `check-first` and are re-read from the plan the same way, so
-  // the plan lens running resolves them too; without it they were carried forever.
-  run('seeded-check-first', page([finding('R1', { specialist: 'check-first' })]));
-  const cf = island(run('seeded-check-first', page([], { lenses: ['plan'], reviewedFiles: [] })).html);
-  check('a check-first finding resolves when the plan lens runs (#231)',
+  // the plan lens running on their own plan resolves them too.
+  run('seeded-check-first', page([finding('R1', { specialist: 'check-first' })], { mustCheckPlan: 'plans/own.md' }));
+  const cf = island(run('seeded-check-first', page([], planRun('plans/own.md'))).html);
+  check('a check-first finding resolves when the plan lens runs on its own plan (#231, #310)',
     finds(cf).length === 0 && /1 resolved/.test(cf.sinceLast || ''), cf.sinceLast);
+
+  // 310: the #300 review nearly closed three findings from the #293 plan by
+  // listing the plan lens for a run that read only the #300 plan.
+  const stamped = island(run('mc-other', page([mustCheck('R1', 'check-first')], planRun('plans/A.md'))).html);
+  const other = run('mc-other', page([], planRun('plans/B.md')));
+  const otherD = island(other.html);
+  check('310: a must-check finding from another plan stays open when the plan check runs',
+    finds(stamped)[0] && finds(stamped)[0].seededFrom === 'plans/A.md' &&
+    finds(otherD).length === 1 && finds(otherD)[0].carried === true && finds(otherD)[0].seededFrom === 'plans/A.md' &&
+    /still open/.test(otherD.sinceLast || '') && !/resolved/.test(otherD.sinceLast || '') && /another plan/.test(other.stderr),
+    JSON.stringify([finds(stamped)[0] && finds(stamped)[0].seededFrom, otherD.sinceLast, other.stderr.trim()]));
+
+  run('mc-noplan', page([mustCheck('R1', 'plan-critic')], planRun('plans/A.md')));
+  const noplan = run('mc-noplan', page([], planRun(null)));
+  const noplanD = island(noplan.html);
+  check('310: with no plan named a must-check finding stays open and a note says why',
+    finds(noplanD).length === 1 && finds(noplanD)[0].carried === true && !/resolved/.test(noplanD.sinceLast || '') &&
+    /mustCheckPlan/.test(noplan.stderr), JSON.stringify([noplanD.sinceLast, noplan.stderr.trim()]));
+
+  // An unstamped finding (seeded before #310, or by a run that named no plan)
+  // belongs to whichever plan still holds its Source line word for word.
+  run('mc-unstamped', page([mustCheck('R1', 'check-first')]));
+  const underB = island(run('mc-unstamped', page([], planRun('plans/B.md'))).html);
+  const underA = island(run('mc-unstamped', page([], planRun('plans/A.md'))).html);
+  check('310: an older finding with no stamp belongs to the plan that holds its source line',
+    finds(underB).length === 1 && finds(underB)[0].carried === true && !finds(underB)[0].seededFrom &&
+    finds(underA).length === 0 && /1 resolved/.test(underA.sinceLast || ''),
+    JSON.stringify([underB.sinceLast, underA.sinceLast]));
+
+  run('mc-merged', page([mustCheck('R1', 'security, check-first', { file: { relPath: 'a.js' } })], planRun('plans/A.md')));
+  const merged = island(run('mc-merged', page([], { lenses: ['security'], reviewedFiles: ['a.js'], mustCheckPlan: 'plans/B.md' })).html);
+  check('310: a merged finding with a must-check source is not closed by its other lens',
+    finds(merged).length === 1 && finds(merged)[0].carried === true, merged.sinceLast);
+
+  run('mc-twice', page([finding('R1', { specialist: 'check-first', fields: [{ label: 'Source', value: '- [check] z-9 (step 1): a line no plan here holds.' }] })]));
+  run('mc-twice', page([], planRun('plans/A.md')));
+  const twice = island(run('mc-twice', page([], planRun('plans/A.md'))).html);
+  check('310: a run that carries a finding never stamps it',
+    finds(twice).length === 1 && finds(twice)[0].carried === true && finds(twice)[0].seededFrom === undefined,
+    JSON.stringify(finds(twice)).slice(0, 300));
+
+  run('mc-followup', page([mustCheck('R1', 'check-first')], planRun('plans/A.md')));
+  const followup = island(run('mc-followup', page([], planRun('plans/C.md'))).html);
+  check('310: a stamped finding closes under a follow-up plan that copied its source line',
+    finds(followup).length === 0 && /1 resolved/.test(followup.sinceLast || ''), followup.sinceLast);
+
+  const smuggledStamp = island(run('mc-smuggle', page([mustCheck('R1', 'check-first', { seededFrom: 'plans/B.md' })], planRun('plans/A.md'))).html);
+  const bare = island(run('mc-smuggle-bare', page([mustCheck('R1', 'check-first', { seededFrom: 'plans/B.md' })])).html);
+  check('310: the stamp is the renderer\'s: a payload\'s own seededFrom is replaced, or dropped with no plan named',
+    finds(smuggledStamp)[0].seededFrom === 'plans/A.md' && finds(bare)[0].seededFrom === undefined,
+    JSON.stringify([finds(smuggledStamp)[0].seededFrom, finds(bare)[0].seededFrom]));
 
   // security-audit has its own token on purpose (security-audit/SKILL.md): a
   // small security pass must never resolve a whole-repo audit finding.

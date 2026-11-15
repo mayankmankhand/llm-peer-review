@@ -73,6 +73,8 @@
     // lens is not in this list, flagged "carried" (see the finding object
     // below), rather than reporting them resolved.
     "lenses": [ "code" ],
+    // The plan /review seeded must-check findings from; the renderer stamps it on each one as seededFrom and closes a carried one only for its own plan.
+    "mustCheckPlan": "plans/PLAN-example.md",
 
     // Sticky top-issues bar. Each key is an array of entry strings.
     // A row always renders for all three severities (shows the count, e.g.
