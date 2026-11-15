@@ -305,7 +305,6 @@
 - **Give a sentence-break rule an abbreviation exception; any false positive a critic names is tested first.**
 - **A sentence that must read the same in several prompt files gets a parity test.**
 - **When a worker gains a capability, sweep the dispatcher for conditions that capability made obsolete.**
-- **When a model types JSON in the one-argument form, it must hold no apostrophe, not even as an escape.**
 - **When merging findings, match same-file findings on their claim, not only on their dedup key.**
 - **Key a record that suppresses findings on the text a finding is about, never on the file name alone.**
 
@@ -563,7 +562,6 @@
 ## Issue 290 (catch a skipped before check at its step)
 
 - **Moving scratch work to one fixed folder needs a look-there-first rule, or a retry copies restored files over it.**
-- **Reach a folder outside the repo by absolute path, never by `cd`: the session's working folder moves with it.**
 
 ## Issues 303 to 305 (the map at /merge, every FAIL line, the upgrade schedule)
 
@@ -577,7 +575,6 @@
 
 ## Issue 300 (the kept-text read)
 
-- **Before a standing review page lists the plan lens, check its open seeded findings came from this run's plan.**
 - **To call a script's private functions without editing it, compile its source at its own path with one export line added.**
 
 ## Issues 309 and 310 (the quoted folder and the apostrophe check)
