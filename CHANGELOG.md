@@ -4,19 +4,34 @@
 
 ## Unreleased
 
-**The troubleshooting page now covers a long session that skips or garbles a stage's last steps (#293).** When Claude Code compresses a long session partway through a review, a docs step or a build, the later steps of that stage's instructions are gone. The new entry says how to recover and how to keep it from happening.
+**A push from a folder whose path holds a space now goes through, and a new check stops a command whose quoted text an apostrophe cuts (#309, #310).** A reviewer's note beside its findings no longer stops a review, and a must-check finding on the review page now closes only on a review of its own plan. The troubleshooting page also covers a long session that skips or garbles a stage's last steps (#293).
 
 ### Added
 
+- **An apostrophe check (#310).** A new plugin hook reads each command before it runs and blocks it when an apostrophe cuts its single-quoted text: a closing quote followed straight away by a letter, as in `node -e '... the plan's steps ...'`, or a quote that never closes. The block names the spot and tells Claude to put the text in a file and pass the file, which Claude does by itself. Text inside double quotes, comments and here-documents is left alone. If the check crashes or hangs, the command runs as it would have without it. Before it shipped, it was replayed over the 27,852 commands saved in this repository's sessions: it blocked 13, of which 12 had failed with a quoting error and the 13th had run on the wrong words (decided by a hand read), and it caught both recorded repeats of the mistake.
 - **A troubleshooting entry for a stage garbled by a compression (#293).** Under "Every install": if it already happened, open a new session and run that stage's command again; to keep it from happening, start a new session between cycles and leave the `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` setting alone.
 - **Maintainer only: the toolkit's own repository holds a compression until the running stage ends (#293).** A script switched on in this repository's settings refuses an automatic compression while a loop stage runs and lets it through at the stage's closing step, leaving a short handoff note; the compression point here moves from 65% to 50%. It passed a replay over saved sessions and two live practice sessions before it was switched on. It is not in the plugin: whether it ships is decided after a recount of real sessions, and six fixes the review found come first.
 - **Maintainer only: the follow-up read of the kept-text path (#300).** The v8.0.19 notes said issue #300 would read how often a failed word-search recheck goes to the fresh verifier. In the 6 reviews since that change, all on a build that holds it, the 9 rechecks that could have sent a fix there all passed, so it never fired; across all saved reviews it would have fired at most once in 66. That says how rare the path is, not how often the verifier is right. The path stays as it is, and the read is recorded under the trial line in `docs/HITL-MAP.md`.
 
+### Changed
+
+- **A reviewer's note beside its findings no longer stops a review (#310).** Before, the review's merge step refused a reviewer's whole reply when any line of it was prose, and the review stopped there. Now each such line is set aside and the findings are kept; a line that names something the reviewer could not check is listed under "What I could not check" in the report. A reply with no finding and no `NO FINDINGS` line, or a line that looks like a broken finding, still stops the merge, because either could hide a lost finding. The two replies that stopped an earlier review in this repository now merge.
+- **A must-check finding on the review page closes only on a review of its own plan (#310).** Before, a review that ran the plan check could close an open must-check finding from an earlier plan it never re-read. Now `/tk:review` names the plan it took its must-check list from, and the page closes a carried must-check finding only when it came from that plan; any other stays open, with a "Still open because" line saying why. A project's own review command that names no plan sees its must-check findings stay open.
+
+### Fixed
+
+- **A push from a folder whose path holds a space is no longer blocked (#309).** The push guard refused `git -C "/path/to/My Project/.claude/worktrees/worktree-1" push origin HEAD:worktree-1` as not in a standard form, so a side copy of a project whose folder name holds a space could not push. The guard now reads a folder in single quotes, or in double quotes with no `$`, backtick or backslash inside. A folder written as a variable is still blocked, since the guard cannot see what it holds, and that block now names the quoted form.
+
 ### Upgrading
 
-- Nothing to do: this change is to the manual and to the toolkit's own repository; the plugin is unchanged.
+- Everything arrives with the plugin update, with no setup step and no new permission rows.
+- When the apostrophe check stops a command, you may see a hook error starting `quote-guard blocked this command`. Nothing is needed from you: Claude writes the text to a file and passes the file instead.
+- To switch the apostrophe check off, run `export TK_QUOTE_GUARD=off` in a terminal, then start Claude Code from that same terminal; it stays off until you close that terminal.
+- The apostrophe check is a Claude Code hook, so it comes with the plugin only; a copy-install for other editors has no check.
 
 ### Why
+
+An apostrophe inside single-quoted text cut a command three times although a lesson in the toolkit's own log warned about it, so the rule became a check (#310). The other three changes close gaps met in real use: a side copy of a project whose folder name holds a space could not push, one reviewer's stray prose stopped a whole review, and a review of one plan could close must-check findings from another plan while they were still open.
 
 A compression partway through a stage leaves the session with only the start of that stage's instructions, so its closing steps (the report, the hand-off, the docs) can be skipped or garbled. In the toolkit's own repository, compressing at 65% full made that about twice as common as Claude Code's default; the hold is a first attempt to move every compression to a stage boundary instead.
 
