@@ -252,7 +252,11 @@ function besideRecord(files, family) {
 // names the sites that lack it); { kind: 'no-reason' } for an own entry with no
 // reason; { kind: 'stale' } for an own entry whose sentence is not in its file.
 // A record fingerprint whose sentence is gone is ignored: the record only lets
-// sentences through.
+// sentences through. That is safe: the record is kept per file, so such a
+// sentence can pass again only in the file where it was already accepted, while
+// a new sentence, or a recorded one put into another file, still fails. Failing
+// on a gone sentence instead would break this test on every rewording in the
+// nine files (kept on the owner's word, review of #312, 2026-11-15).
 function besideMisses(files, family, record, own) {
   const at = {};
   for (const site of family.sites) at[siteShort(site)] = besideSentences(files[site] || '', family);
