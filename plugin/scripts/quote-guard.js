@@ -22,9 +22,13 @@
 //     inside a $( ) or a backtick there, where quotes are real again;
 //   - $'...' strings, where \' is an escaped quote;
 //   - a backslash-escaped apostrophe outside quotes, and so the '\'' form.
-// Where its reading is simpler than bash's (a ) inside a case pattern, a <<
-// read as a here-document in arithmetic), it reads less of the command, so it
-// can miss a cut but never invents one.
+// Where its reading is simpler than bash's, it can go either way. A << read
+// as a here-document in arithmetic makes it read less of the command, so it
+// may miss a cut. A case pattern's ) inside a double-quoted $( ) ends that
+// $( ) early, so a double-quoted apostrophe after it can look unclosed and a
+// command that would run is blocked (review of #310); the block's own way
+// through, the text in a file, still works. The replay over this repository's
+// saved commands found no block of that shape.
 //
 // The hook, main(): the call arrives as JSON on stdin. The script prints one
 // deny answer, or nothing, and always exits 0. It has no failure rule in the

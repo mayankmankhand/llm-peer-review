@@ -192,6 +192,17 @@ reader('309: an empty quoted folder is denied', "git -C '' push origin HEAD:feat
 reader('309: a quoted folder that starts with - is denied', "git -C '-my repo' push origin HEAD:feature", { decision: 'deny', code: 'plain' });
 reader('309: a quoted folder holding a tab is denied', "git -C 'my\trepo' push origin HEAD:feature", { decision: 'deny', code: 'plain' });
 reader('309: a double-quoted folder from a variable is still denied as unreadable', 'git -C "$dir" push origin HEAD:feature', { decision: 'deny', code: 'unreadable' });
+// Review of #309, R2: the reader rewrote $?, ${PIPESTATUS[N]} and a
+// backslash-newline everywhere before reading quotes, but bash leaves all
+// three alone inside single quotes, so a folder named 'r$?' was scanned as r0
+// while git pushed from r$?. The rewrites now stop at single quotes.
+reader('309 review: a single-quoted folder holding $? is scanned as written', "git -C 'r$?' push origin HEAD:feature",
+  { decision: 'scan', code: 'standard', push: { folder: 'r$?' } });
+reader('309 review: a single-quoted folder holding a PIPESTATUS form is scanned as written', "git -C 'r${PIPESTATUS[0]}' push origin HEAD:feature",
+  { decision: 'scan', code: 'standard', push: { folder: 'r${PIPESTATUS[0]}' } });
+reader('309 review: a backslash-newline inside a single-quoted folder is kept, so the folder is denied', "git -C 'r\\\ns' push origin HEAD:feature", { decision: 'deny', code: 'plain' });
+reader('309 review: a backslash-newline inside a shell script given with -c still reads as a push', "bash -c 'git pu\\\nsh origin HEAD:feature'", { decision: 'deny', code: 'shell' });
+reader('309 review: the same in an unreadable command still reads as a push', "bash -c 'git pu\\\nsh origin HEAD:feature'; echo \"$X\"", { decision: 'deny', code: 'unreadable' });
 (function () {
   // The deny reason names the form the guard reads, so a retry lands on it.
   const partly = classifyOrError("git -C 'my repo'x push origin HEAD:feature");

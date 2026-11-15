@@ -1735,6 +1735,33 @@ function issue162Tests() {
     finds(smuggledStamp)[0].seededFrom === 'plans/A.md' && finds(bare)[0].seededFrom === undefined,
     JSON.stringify([finds(smuggledStamp)[0].seededFrom, finds(bare)[0].seededFrom]));
 
+  // Review of #310, R7: a named plan the renderer cannot use (outside the
+  // project, or unreadable) is treated as absent: it stamps nothing, closes
+  // nothing, leaves no key on the page, and says so on stderr.
+  const mcOutside = run('mc-outside', page([mustCheck('R1', 'check-first')], planRun('../outside-plan.md')));
+  const outsideD = island(mcOutside.html);
+  check('310 review: a named plan outside the project is treated as absent',
+    finds(outsideD)[0] && finds(outsideD)[0].seededFrom === undefined && outsideD.mustCheckPlan === undefined &&
+    /mustCheckPlan names a file outside the project, so it is treated as absent/.test(mcOutside.stderr),
+    JSON.stringify([finds(outsideD)[0] && finds(outsideD)[0].seededFrom, outsideD.mustCheckPlan, mcOutside.stderr.trim()]));
+  run('mc-unreadable', page([mustCheck('R1', 'check-first')], planRun('plans/A.md')));
+  const unreadable = run('mc-unreadable', page([], planRun('plans/no-such-plan.md')));
+  const unreadableD = island(unreadable.html);
+  check('310 review: an unreadable named plan is treated as absent, so a carried finding stays open',
+    finds(unreadableD).length === 1 && finds(unreadableD)[0].carried === true && unreadableD.mustCheckPlan === undefined &&
+    /mustCheckPlan names a file that could not be read, so it is treated as absent/.test(unreadable.stderr),
+    JSON.stringify([unreadableD.sinceLast, unreadable.stderr.trim()]));
+
+  // Review of #310, R15: the reason a must-check finding stayed open reached
+  // only the terminal; the page now says it on the finding, once per carry.
+  const whyRow = function (f) { return (f && Array.isArray(f.fields) ? f.fields : []).filter(function (r) { return r && r.label === 'Still open because'; }); };
+  const otherRows = whyRow(finds(otherD)[0]);
+  const twiceRows = whyRow(finds(twice)[0]);
+  check('310 review: a carried must-check finding says on the page why it stayed open',
+    otherRows.length === 1 && /another plan/.test(otherRows[0].value) && otherRows[0].value.indexOf('plans/A.md') !== -1 &&
+    twiceRows.length === 1 && whyRow(finds(noplanD)[0]).length === 1,
+    JSON.stringify([otherRows, twiceRows, whyRow(finds(noplanD)[0])]));
+
   // security-audit has its own token on purpose (security-audit/SKILL.md): a
   // small security pass must never resolve a whole-repo audit finding.
   run('audit-sep', page([finding('R1', { specialist: 'security-audit', file: { relPath: 'a.js' } })]));

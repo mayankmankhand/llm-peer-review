@@ -69,6 +69,9 @@
 //     `sh` on the next line read as the push they are.
 //   - $? and ${PIPESTATUS[N]} read as 0: they only ever expand to a number,
 //     and Claude often ends a push with an echo of one.
+//   These two rewrites stop at single quotes, inside which bash keeps all
+//   three as written (review of #309), except in the unreadable-command
+//   check below, which drops every backslash-newline.
 // A command the tokenizer still refuses (here-documents, $( ), variables) is
 // denied when one of its lines names git and then push (git stash push
 // aside), and gets no answer otherwise. That check reads only what bash would
@@ -214,10 +217,42 @@ function readMessageForms(text) {
 
 // The three readings that come before the tokenizer (see the header).
 function prepare(text) {
-  return readMessageForms(text)
-    .replace(/\\\n/g, '')
-    .replace(/\$\?/g, '0')
-    .replace(/\$\{PIPESTATUS\[[0-9]+\]\}/g, '0');
+  return rewriteOutsideSingleQuotes(readMessageForms(text));
+}
+
+// Drops each backslash-newline and reads $? and ${PIPESTATUS[N]} as 0, but
+// only where bash would: never inside single quotes, which keep all three as
+// written. Rewriting them there let a folder named 'r$?' be scanned as r0
+// while git pushed from r$? (review of #309, R2). Quotes are found by the
+// tokenizer's own rules (a ' opens single quotes outside double quotes, a
+// backslash escapes the next character), so this pass and the words it feeds
+// agree on what is quoted. Shell comments are not special to either.
+const PIPESTATUS = /^\$\{PIPESTATUS\[[0-9]+\]\}/;
+function rewriteOutsideSingleQuotes(text) {
+  let out = '';
+  let inDouble = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "'" && !inDouble) {
+      const close = text.indexOf("'", i + 1);
+      const end = close === -1 ? text.length : close + 1;
+      out += text.slice(i, end);
+      i = end - 1;
+      continue;
+    }
+    if (c === '\\') {
+      if (text[i + 1] === '\n') { i += 1; continue; }
+      out += text.slice(i, i + 2);
+      i += 1;
+      continue;
+    }
+    if (c === '"') { inDouble = !inDouble; out += c; continue; }
+    if (c === '$' && text[i + 1] === '?') { out += '0'; i += 1; continue; }
+    const status = c === '$' ? PIPESTATUS.exec(text.slice(i, i + 32)) : null;
+    if (status) { out += '0'; i += status[0].length - 1; continue; }
+    out += c;
+  }
+  return out;
 }
 
 // A here-document opener: << (not a <<< here-string), an optional - that
@@ -512,7 +547,10 @@ function classify(command, depth) {
   const text = prepare(command);
   const read = tokenizer()(text);
   if (read.error) {
-    const shell = shellText(text);
+    // Every backslash-newline is dropped here, quoted or not: a script given
+    // to sh -c inside single quotes runs it as a line join, and reading more
+    // pushes here only denies more.
+    const shell = shellText(text.replace(/\\\n/g, ''));
     if (!namesGitPush(shell)) return none('not-a-push');
     // A -C folder the tokenizer refused (a variable, $( ), a brace) is
     // retried as the path typed out, so the hint names that form first.

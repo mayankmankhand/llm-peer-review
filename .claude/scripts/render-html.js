@@ -1835,6 +1835,24 @@ function mustCheckReason(f, planRan, plan) {
   return 'mcOther';
 }
 
+// The row a carried must-check finding shows on the page, saying in plain
+// words why it stayed open (review of #310, R15): the reason used to reach
+// only the terminal. The renderer owns the row; carryForward replaces it on
+// every carry, and a payload's own copy is stripped.
+const MUST_CHECK_OPEN_LABEL = 'Still open because';
+function mustCheckOpenRow(f, reason) {
+  let value = 'the plan check did not run this time, and only it can close a must-check item.';
+  if (reason === 'mcNoPlan') value = 'this review named no plan, and only a review that names the plan this item came from can close it.';
+  if (reason === 'mcOther') {
+    value = 'it came from another plan (' + (f.seededFrom ? '<code>' + escapeHtmlText(f.seededFrom) + '</code>' : 'an earlier one') +
+      '), and only a review of that plan, or of a later plan that copies this item, can close it.';
+  }
+  return { label: MUST_CHECK_OPEN_LABEL, value: value };
+}
+function withoutOpenRow(fields) {
+  return (Array.isArray(fields) ? fields : []).filter(function (r) { return !(r && r.label === MUST_CHECK_OPEN_LABEL); });
+}
+
 // Which lenses a finding belongs to: its `specialist` ("code", "code, ux",
 // "[code, ux]"), falling back to the group it sits in. Lowercased tokens, plus
 // `plan` for a seeded finding.
@@ -1933,6 +1951,9 @@ function carryForward(data, prior, plan) {
     const copy = JSON.parse(JSON.stringify(item.f));
     delete copy.isNew; delete copy.demoted; delete copy._key;
     copy.carried = true;
+    if (reason === 'mcLens' || reason === 'mcNoPlan' || reason === 'mcOther') {
+      copy.fields = withoutOpenRow(copy.fields).concat(mustCheckOpenRow(copy, reason));
+    }
     present[key] = true;
     why[reason] += 1;
     carried.push(copy);
@@ -2054,6 +2075,7 @@ if (opts.shell === 'review') {
   // renderer's too, set below from mustCheckPlan alone.
   openFindings(parsed).concat(auditedFindings(parsed)).forEach(function (f) {
     delete f.carried; delete f.isNew; delete f.demoted; delete f.seededFrom;
+    if (Array.isArray(f.fields)) f.fields = withoutOpenRow(f.fields);
   });
   // The shell lets `specialist` default to the group label, but the contract
   // pass collapses the groups into one unlabeled list before the page is
