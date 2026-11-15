@@ -45,7 +45,7 @@ const disclosure = format.split(/\r?\n/).find(l => l.startsWith('**One optional 
 check('dispatch-format.md defines the line in one paragraph, as a disclosure with no ID, receipt or audit', !!disclosure && /it gets no ID, no receipt and no audit/.test(disclosure) && /never a `NOT CHECKED:` line; it is a finding/.test(disclosure));
 check('review.md inlines dispatch-format.md whole, so the orchestrator parses the format the finder was given', /cat \.claude\/skills\/shared\/dispatch-format\.md/.test(review) && !review.includes(disclosure));
 check('review.md keeps the line out of its parse-failure rule', /a `NOT CHECKED:` line beside the JSONL or `NO FINDINGS` is part of the format, not a parse failure/.test(review));
-check('review.md sets each line aside for What I could not check, never as a finding', /Set each `NOT CHECKED:` line aside with its specialist's name for "What I could not check"/.test(review) && /each `NOT CHECKED:` line a specialist returned goes under the latter/.test(review));
+check('review.md sets each line aside for What I could not check, never as a finding', /Set each `NOT CHECKED:` line aside with its specialist's name for "What I could not check"/.test(review) && /each `NOT CHECKED:` line a specialist returned, and each `set aside` line Phase 3 kept, goes under the latter/.test(review));
 check('report-format.md names the line among the could-not-check rows', /a `NOT CHECKED:` line a dispatched specialist returned/.test(read('.claude/skills/shared/report-format.md')));
 check('the dispatch contract a finder preloads names the line as a disclosure, never a finding', /`NOT CHECKED:` lines beside them, as that format defines: a disclosure, never a finding/.test(read('.claude/skills/dispatch-contract/SKILL.md')));
 const prompts = promptFiles();
@@ -138,12 +138,14 @@ for (const file of MERGE_SITES) check(file + ' carries the merge sentence word f
 // site in the review command's words, so a direct run re-keys the same way.
 const REKEY = 'Two findings that describe one defect under different keys are the one judgment this pass leaves to you: before running the helper, give the later one the earlier one\'s `key` and record the merge in the report\'s dedup notes.';
 for (const file of MERGE_SITES) check(file + ' carries the re-key sentence word for word, once', count(read(file), REKEY) === 1, count(read(file), REKEY) + ' found');
-// Review of #310, R16: the merge helper sets aside a worker's text beside its
-// findings, and each direct-run criteria file that hands lines to it says how
-// to list that text, in one sentence kept word for word at every site.
+// Review of #310, R16 and R17: the merge helper sets aside a worker's text
+// beside its findings, and every direct runner that hands lines to it (the
+// review command says the same in its own words) says how to list that text,
+// in one sentence kept word for word at every site.
 const SET_ASIDE = 'A `set aside` line the helper prints on stderr is text a worker wrote beside its findings: list it under "What I could not check", with the worker\'s lens, when it names something the worker could not check, and drop a code fence, a sign-off or a summary of its own findings.';
 const SET_ASIDE_SITES = ['.claude/skills/shared/criteria-code.md', '.claude/skills/shared/criteria-commands.md', '.claude/skills/shared/criteria-copy.md',
-  '.claude/skills/shared/criteria-plan.md', '.claude/skills/shared/criteria-ux.md'];
+  '.claude/skills/shared/criteria-plan.md', '.claude/skills/shared/criteria-ux.md', '.claude/skills/review-full/SKILL.md', '.claude/skills/upgrade/SKILL.md',
+  '.claude/skills/security-audit/SKILL.md'];
 for (const file of SET_ASIDE_SITES) check(file + ' carries the set-aside sentence word for word, once', count(read(file), SET_ASIDE) === 1, count(read(file), SET_ASIDE) + ' found');
 const byHand = prompts.filter(([, t]) => /Assign R-IDs yourself|assigns Finding IDs after dedup|combine and renumber their findings/.test(t)).map(([f]) => f);
 check('no prompt file keeps the old by-hand wording of the pass', byHand.length === 0, byHand.join(', '));
