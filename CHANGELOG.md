@@ -4,9 +4,12 @@
 
 ## Unreleased
 
-**A push from a folder whose path holds a space now goes through, and a new check stops a command whose quoted text an apostrophe cuts (#309, #310).** A reviewer's note beside its findings no longer stops a review, and a must-check finding on the review page now closes only on a review of its own plan. The troubleshooting page also covers a long session that skips or garbles a stage's last steps (#293).
+**A push from a folder whose path holds a space now goes through, and a new check stops a command whose quoted text an apostrophe cuts (#309, #310).** A reviewer's note beside its findings no longer stops a review, and a must-check finding on the review page now closes only on a review of its own plan. The troubleshooting page also covers a long session that skips or garbles a stage's last steps (#293). A plan's test lines are now checked for a guessed failure line before the plan is shown (#311).
 
 ### Added
+
+- **The plan check warns about a test line that guesses its failure line (#311).** When `/tk:create-plan` checks a new plan, it now warns about a test line whose stated failure leaves out the word a test tool prints for a failed case (`FAIL`, `FAILED`, `not ok`, or a cross mark such as `✕` or `✘`), or expects the case's name straight after that word. Four plans in this repository guessed that line wrong, because the tool printed a label, a dash or a list in between, and each spent one of a step's three tries. The warning names the fix: the word and the name on one line with room between them, for example `(?:FAIL|not ok)[^\n]*the discount rounds down`. A warning never stops a step. It reads the test runs the checks runner allows (`npm test`, `yarn`, `pnpm` and `bun test`, `pytest`, `go test`, `cargo test`, `make test`, and jest, vitest, ava, tap and playwright through `npx`); mocha is left out, because its default reporter prints no failure word.
+- **Maintainer only: the wording test catches a sentence written into one of the merge helper's nine files only (#312).** A new sentence beside the merge helper in one of the nine review files that run it now fails the wording test, which names the files without it. It passes once the sentence is pinned word for word in all nine, or listed as that file's own with a written reason. Replayed on the checkpoint of the last such slip (#310), it names that sentence.
 
 - **An apostrophe check (#310).** A new plugin hook reads each command before it runs and blocks it when an apostrophe cuts its single-quoted text: a closing quote followed straight away by a letter, as in `node -e '... the plan's steps ...'`, or a quote that never closes. The block names the spot and tells Claude to put the text in a file and pass the file, which Claude does by itself. Text inside double quotes, comments and here-documents is left alone. If the check crashes or hangs, the command runs as it would have without it. Before it shipped, it was replayed over the 27,852 commands saved in this repository's sessions: it blocked 13, of which 12 had failed with a quoting error and the 13th had run on the wrong words (decided by a hand read), and it caught both recorded repeats of the mistake.
 - **A troubleshooting entry for a stage garbled by a compression (#293).** Under "Every install": if it already happened, open a new session and run that stage's command again; to keep it from happening, start a new session between cycles and leave the `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` setting alone.
@@ -15,6 +18,7 @@
 
 ### Changed
 
+- **Plans state a test's failure line in a shape that fits the tool's output (#311).** The plan command's example and the check-first rule now describe a test target's stated failure as the case's name on a line that also holds the tool's failure word, with room between the two, and say to take the word and its place from the tool's real output, never from memory.
 - **A reviewer's note beside its findings no longer stops a review (#310).** Before, the review's merge step refused a reviewer's whole reply when any line of it was prose, and the review stopped there. Now each such line is set aside and the findings are kept; a line that names something the reviewer could not check is listed under "What I could not check" in the report. A reply with no finding and no `NO FINDINGS` line, or a line that looks like a broken finding, still stops the merge, because either could hide a lost finding. The two replies that stopped an earlier review in this repository now merge.
 - **A must-check finding on the review page closes only on a review of its own plan (#310).** Before, a review that ran the plan check could close an open must-check finding from an earlier plan it never re-read. Now `/tk:review` names the plan it took its must-check list from, and the page closes a carried must-check finding only when it came from that plan; any other stays open, with a "Still open because" line saying why. A project's own review command that names no plan sees its must-check findings stay open.
 
@@ -28,12 +32,16 @@
 - When the apostrophe check stops a command, you may see a hook error starting `quote-guard blocked this command`. Nothing is needed from you: Claude writes the text to a file and passes the file instead.
 - To switch the apostrophe check off, run `export TK_QUOTE_GUARD=off` in a terminal, then start Claude Code from that same terminal; it stays off until you close that terminal.
 - The apostrophe check is a Claude Code hook, so it comes with the plugin only; a copy-install for other editors has no check.
+- A plan written before the update may show warnings on its test lines; they change nothing about how its steps run. To clear one, rewrite the line in the shape the warning names, or keep it and give the reason in the plan. A project whose test tool marks a failed case with none of the listed words can keep its lines the same way.
+- A command of your own that reads the plan check's output keeps working: its `problems` and `missingPaths` lists are unchanged, and the warnings come as a third list, `warnings`.
 
 ### Why
 
 An apostrophe inside single-quoted text cut a command three times although a lesson in the toolkit's own log warned about it, so the rule became a check (#310). The other three changes close gaps met in real use: a side copy of a project whose folder name holds a space could not push, one reviewer's stray prose stopped a whole review, and a review of one plan could close must-check findings from another plan while they were still open.
 
 A compression partway through a stage leaves the session with only the start of that stage's instructions, so its closing steps (the report, the hand-off, the docs) can be skipped or garbled. In the toolkit's own repository, compressing at 65% full made that about twice as common as Claude Code's default; the hold is a first attempt to move every compression to a stage boundary instead.
+
+Two more slips kept coming back although a lesson warned about each: a plan guessed what a failing test would print and guessed wrong in four cycles, and a sentence written into one of the nine review files when all nine needed it slipped through twice. Both now have a check instead of a lesson (#311, #312).
 
 ## v8.0.22 - Stopped Before It Leaves (2026-11-12)
 
