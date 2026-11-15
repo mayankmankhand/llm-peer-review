@@ -169,8 +169,37 @@ reader('284: -C with -c before push is denied', 'git -C a -c core.hooksPath=/dev
 reader('284: --git-dir with -C before push is denied', 'git --git-dir=x/.git -C a push origin HEAD:feature', { decision: 'deny', code: 'options' });
 reader('284: -C before another option is denied', 'git -C a --no-pager push origin HEAD:feature', { decision: 'deny', code: 'options' });
 reader('284: a -C folder with ~ is denied', 'git -C ~/repo push origin HEAD:feature', { decision: 'deny', code: 'plain' });
-reader('284: a -C folder with a space is denied', "git -C 'my repo' push origin HEAD:feature", { decision: 'deny', code: 'plain' });
 reader('284: a -C folder from a variable is denied as unreadable', 'git -C $WT push origin HEAD:feature', { decision: 'deny', code: 'unreadable' });
+// 309: a folder with a space in its name is read when the whole word sits
+// inside one pair of quotes that expand nothing: single quotes, or double
+// quotes holding no $, backtick or backslash. bash then passes git exactly
+// the text between them.
+reader('309: a single-quoted folder with a space is a standard push that carries its folder', "git -C 'my repo' push origin HEAD:feature",
+  { decision: 'scan', code: 'standard', push: { remote: 'origin', src: 'HEAD', dst: 'feature', folder: 'my repo' } });
+reader('309: a double-quoted folder with a space is a standard push', 'git -C "my repo" push origin HEAD:feature',
+  { decision: 'scan', code: 'standard', push: { dst: 'feature', folder: 'my repo' } });
+reader('309: the command the issue reports is a standard push', 'git -C "/path/to/My Project/.claude/worktrees/worktree-1" push origin HEAD:worktree-1',
+  { decision: 'scan', code: 'standard', push: { remote: 'origin', src: 'HEAD', dst: 'worktree-1', folder: '/path/to/My Project/.claude/worktrees/worktree-1' } });
+// The folders that stay denied: quoted only in part (bash expands the rest),
+// double quotes holding something bash reads, empty, an option, a control
+// character. A bare folder with ~ stays denied by the 284 case above.
+reader('309: a folder quoted only in part is denied', "git -C 'my repo'x push origin HEAD:feature", { decision: 'deny', code: 'plain' });
+reader('309: a quoted folder followed by a brace expansion is denied', "git -C 'my repo'{x,y} push origin HEAD:feature", { decision: 'deny', code: 'unreadable' });
+reader('309: a double-quoted folder holding $ is denied', 'git -C "my $ repo" push origin HEAD:feature', { decision: 'deny', code: 'plain' });
+reader('309: a double-quoted folder holding a backtick is denied', 'git -C "my `x` repo" push origin HEAD:feature', { decision: 'deny', code: 'unreadable' });
+reader('309: a double-quoted folder holding a backslash is denied', 'git -C "my\\\\ repo" push origin HEAD:feature', { decision: 'deny', code: 'plain' });
+reader('309: an empty quoted folder is denied', "git -C '' push origin HEAD:feature", { decision: 'deny', code: 'plain' });
+reader('309: a quoted folder that starts with - is denied', "git -C '-my repo' push origin HEAD:feature", { decision: 'deny', code: 'plain' });
+reader('309: a quoted folder holding a tab is denied', "git -C 'my\trepo' push origin HEAD:feature", { decision: 'deny', code: 'plain' });
+reader('309: a double-quoted folder from a variable is still denied as unreadable', 'git -C "$dir" push origin HEAD:feature', { decision: 'deny', code: 'unreadable' });
+(function () {
+  // The deny reason names the form the guard reads, so a retry lands on it.
+  const partly = classifyOrError("git -C 'my repo'x push origin HEAD:feature");
+  const variable = classifyOrError('git -C "$dir" push origin HEAD:feature');
+  const names = function (r) { return !!(r.result && r.result.reason && r.result.reason.indexOf("git -C '/path/to/My Project' push") !== -1); };
+  check('reader: 309: the reason for a refused folder names the quoted form', names(partly) && names(variable),
+    JSON.stringify([partly.error || partly.result.reason, variable.error || variable.result.reason]));
+})();
 // Moving the shell before a -C push would make git push from a folder other
 // than the one the guard resolves, so every such shape stays denied.
 reader('284: cd before a push that names its folder is denied', 'cd y && git -C ../x push origin HEAD:feature', { decision: 'deny', code: 'not-first' });
@@ -472,6 +501,30 @@ const viaLink = setUp(function () {
   return sb;
 });
 hook('284: a folder through a link and back up is scanned where git pushes from', runHook(function () { return bashCall('git -C lnk/.. push origin HEAD:feature', viaLink.repo); }), 'deny', '[gitlab-pat]');
+// 309: the landing's push from a project folder with a space in its name,
+// in the issue's shape: the worktree under .claude/worktrees/, its absolute
+// path double-quoted after -C, pushed as HEAD:<branch> from the main folder.
+function spacedWorktree(label, file, contents) {
+  const sb = scratchRepo(label);
+  const wt = path.join(sb.repo, '.claude', 'worktrees', 'worktree-1');
+  sb.g(['worktree', 'add', '-q', '-b', 'worktree-1', wt]);
+  const w = function (args) { return execFileSync('git', args, { cwd: wt, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+  fs.mkdirSync(path.dirname(path.join(wt, file)), { recursive: true });
+  fs.writeFileSync(path.join(wt, file), contents);
+  w(['add', file]);
+  w(['commit', '-qm', 'add ' + file]);
+  sb.wt = fs.realpathSync(wt);
+  return sb;
+}
+const spacedClean = setUp(function () { return spacedWorktree('My Project', 'src/app.js', 'console.log("ordinary code");\n'); });
+const spacedKeyed = setUp(function () { return spacedWorktree('My Keyed Project', 'ci/token.env', 'CI_TOKEN' + '=' + FAKE_KEY + '\n'); });
+hook('309: a clean push from a worktree in a folder with a space gets no answer', runHook(function () {
+  if (spacedClean.wt.indexOf(' ') === -1) throw new Error('the scratch worktree path holds no space: ' + spacedClean.wt);
+  return bashCall('git -C "' + spacedClean.wt + '" push origin HEAD:worktree-1', spacedClean.repo);
+}), 'none');
+hook('309: a keyed push from a worktree in a folder with a space is scanned there and blocked', runHook(function () {
+  return bashCall('git -C "' + spacedKeyed.wt + '" push origin HEAD:worktree-1', spacedKeyed.repo);
+}), 'deny', '[gitlab-pat]');
 check('prescribed: .claude/commands/merge.md still names the folder on every git call when a cd does not stick', (function () {
   try { return fs.readFileSync(path.join(ROOT, '.claude', 'commands', 'merge.md'), 'utf8').includes('`git -C <worktree> <command>` for git'); } catch (e) { return false; }
 })());

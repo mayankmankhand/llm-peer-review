@@ -339,12 +339,16 @@ const EXPECT_KEYS = ['exit', 'match', 'noMatch', 'lines'];
 //   operators     per segment, the operator that ended it: '|', '||', '&&', ';',
 //                 '\n', or null for the last one
 //   redirections  per segment, the safe redirection forms consumed, in order
-//   meta          per segment, per word: { raw, input, quoted, quote }
+//   meta          per segment, per word: { raw, input, quoted, quote, whole }
 //                 raw     the word with the plugin-root sentinel still in it
 //                 input   true when the word is the file of an unquoted `<`
 //                         (the word keeps a leading `<`, as before)
 //                 quoted  true when the word began inside quotes
 //                 quote   the quote character that opened it, or null
+//                 whole   true only when the word is one quoted span, its
+//                         first character to its last ('a b' or "a b", not
+//                         'a b'c or 'a'"b"); the push guard reads a folder
+//                         with a space by it (issue 309)
 // ---------------------------------------------------------------------------
 const PLUGIN_ROOT_LITERAL = '${CLAUDE_PLUGIN_ROOT}';
 const PLUGIN_ROOT_SENTINEL = '\u0001';
@@ -372,10 +376,13 @@ function tokenize(original) {
   let pendingInput = false;   // an unquoted < was read; the next word is its file
   let prevOp = null;          // the operator that ended the last pushed segment
   const n = text.length;
+  // Every piece of a word outside quotes, and every quote that opens, comes
+  // through here; a second piece of an open word means it is no longer one
+  // quoted span, so `whole` turns false.
   const openWord = (quote) => {
-    if (have) return;
+    if (have) { curMeta.whole = false; return; }
     have = true;
-    curMeta = { raw: '', input: pendingInput, quoted: quote !== null, quote };
+    curMeta = { raw: '', input: pendingInput, quoted: quote !== null, quote, whole: quote !== null && !pendingInput };
     if (pendingInput) { cur = '<'; pendingInput = false; }
   };
   const flushWord = () => {

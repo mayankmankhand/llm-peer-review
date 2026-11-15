@@ -30,8 +30,13 @@
 // A standard push, and why each part of it is required:
 //   git [-C <folder>] push [-u|--set-upstream] [-q|-v|--porcelain|--progress] <remote> <refspec>
 //   - -C <folder> is the one git option allowed before push (#284), once, its
-//     folder a plain word. /tk:merge names a worktree on every git call when
-//     a cd does not stick, so its push arrives in this shape. The hook
+//     folder a plain word or, for a folder with a space in its name (#309),
+//     one whole word inside a single pair of quotes that expand nothing:
+//     single quotes, or double quotes holding no $, backtick or backslash.
+//     A quoted folder that is empty, starts with -, or holds a control
+//     character is denied, and so is one quoted only in part ('a b'c), which
+//     bash would still expand. /tk:merge names a worktree on every git call
+//     when a cd does not stick, so its push arrives in this shape. The hook
 //     resolves the folder against the input's cwd, as git does, and runs
 //     every check below in that folder's repository, because that is the one
 //     git pushes from. Any other option before push could change what git
@@ -42,7 +47,8 @@
 //     branch name or a tag name. The check scans what HEAD adds, so the hook
 //     confirms a branch or tag name is the checked-out commit.
 //   - Every word of the push is plain (letters, digits and ._/:@-+=), so bash
-//     runs exactly the words the guard read: nothing in them can expand.
+//     runs exactly the words the guard read: nothing in them can expand. The
+//     quoted -C folder above is the one exception, read by the same test.
 //   - The push is the command's first part, or comes right after the M11 call
 //     (node running a path that ends in pre-push-check.js), because a command
 //     before it could change what is pushed after the check has run.
@@ -141,6 +147,16 @@ const MESSAGE_WORD = 'message-text';
 
 const STANDARD_FORMS = '`git push -u <remote> HEAD:<branch>`, `git -C <folder> push -u <remote> HEAD:<branch>` for a push from another folder, or `git push <remote> <tag>` for a tag on the checked-out commit';
 const UNREADABLE_HINT = 'If it is not a push, put the long text in a file and pass the file instead (for a commit message, `git commit -F <file>`).';
+// The form a refused -C folder is retried in (#309): the path typed out, not
+// a variable, inside single quotes when it holds a space.
+const FOLDER_HINT = "Type the folder after -C as the path itself, inside single quotes when it holds a space: `git -C '/path/to/My Project' push origin HEAD:<branch>`.";
+// A line that names git -C, in the text bash would run (quotes emptied).
+const GIT_C_WORD = /(?:^|[\s;&|(`'"\/])git\s+-C(?=\s)/;
+// What double quotes may not hold for a folder to be read as typed: bash
+// expands $ and a backtick there, and a backslash (or the " it escapes) means
+// the text was rewritten on the way in.
+const DOUBLE_QUOTE_SPECIAL = /[$`\\"]/;
+const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 
 let tokenizeFn = null;
 function tokenizer() {
@@ -363,10 +379,21 @@ function runnerOf(words, g) {
   return 'data';
 }
 
+// True when the folder after -C is read exactly as git will get it: a plain
+// word, or one whole quoted span that expands nothing (see the header, #309).
+// `m` is the word's tokenizer meta; its `whole` is true only when the word was
+// a single quoted span from its first character to its last.
+function readableFolder(word, m) {
+  if (PLAIN_WORD.test(word)) return true;
+  if (!m || !m.whole || word === '' || word.startsWith('-') || CONTROL_CHAR.test(word)) return false;
+  return m.quote === "'" || (m.quote === '"' && !DOUBLE_QUOTE_SPECIAL.test(word));
+}
+
 // One segment: null when it does not push, { deny } when it pushes in a shape
 // the guard refuses, { standard: true } when it may be a standard push, with
-// `folder` set when the push names its folder with -C (#284).
-function segmentPush(words, level) {
+// `folder` set when the push names its folder with -C (#284). `meta` is the
+// tokenizer's per-word meta for the segment, read for the -C folder.
+function segmentPush(words, level, meta) {
   for (let k = 0; k < words.length; k++) {
     const name = base(words[k]);
     let script = null;
@@ -407,7 +434,10 @@ function segmentPush(words, level) {
   }
   if (runner === 'path') return { deny: deny('git-path', 'it runs git from a path (' + words[g] + ')') };
   if (options.length === 2 && options[0] === '-C') {
-    if (!PLAIN_WORD.test(options[1])) return { deny: deny('plain', 'its folder ' + JSON.stringify(options[1]) + ' holds characters the guard does not read as plain text') };
+    // The folder is the word right after -C, which comes right after git.
+    if (!readableFolder(options[1], meta && meta[g + 2])) {
+      return { deny: deny('plain', 'its folder ' + JSON.stringify(options[1]) + ' holds characters the guard does not read as plain text', FOLDER_HINT) };
+    }
     return { standard: true, folder: options[1] };
   }
   if (options.length) return { deny: deny('options', 'git options come before push (' + options.join(' ') + ')') };
@@ -482,15 +512,18 @@ function classify(command, depth) {
   const text = prepare(command);
   const read = tokenizer()(text);
   if (read.error) {
-    return namesGitPush(shellText(text))
-      ? deny('unreadable', 'it could not be read (' + read.error.replace(/^refused: /, '') + ') and a line of it names git and then push', UNREADABLE_HINT)
-      : none('not-a-push');
+    const shell = shellText(text);
+    if (!namesGitPush(shell)) return none('not-a-push');
+    // A -C folder the tokenizer refused (a variable, $( ), a brace) is
+    // retried as the path typed out, so the hint names that form first.
+    const hint = GIT_C_WORD.test(shell) ? FOLDER_HINT + ' ' + UNREADABLE_HINT : UNREADABLE_HINT;
+    return deny('unreadable', 'it could not be read (' + read.error.replace(/^refused: /, '') + ') and a line of it names git and then push', hint);
   }
   const segs = read.segments;
   const ops = read.operators;
   const found = [];
   for (let i = 0; i < segs.length; i++) {
-    const hit = segmentPush(segs[i], level);
+    const hit = segmentPush(segs[i], level, read.meta[i]);
     if (hit) found.push(Object.assign({ index: i }, hit));
   }
   if (found.length === 0) return none('not-a-push');

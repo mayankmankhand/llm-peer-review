@@ -666,6 +666,12 @@ section('11. bash runs the judged words: expansions refused or inert, pipefail, 
   check('tokenize: an unquoted < followed by spaces binds to the next word', !spaced.error && spaced.meta[0][2].input === true && spaced.segments[0][2] === '<f.txt', JSON.stringify(spaced));
   const ops = tokenize('a | b || c && d; e\nf');
   check('tokenize: operators are recorded per segment', !ops.error && JSON.stringify(ops.operators) === JSON.stringify(['|', '||', '&&', ';', '\n', null]), JSON.stringify(ops.operators));
+  // 309: `quoted` says only that a word began inside quotes; the push guard
+  // needs to know the whole word was one quoted span, which bash expands
+  // nothing in. A word quoted in part ('a b'c, 'a'"b") is not whole.
+  const whole = tokenize("x 'a b' \"a b\" ab 'a b'c 'a'\"b\"");
+  const wholeOf = whole.error ? [] : whole.meta[0].slice(1).map((m) => m.whole);
+  check('309: a word records that all of it sat inside one pair of quotes', !whole.error && JSON.stringify(wholeOf) === JSON.stringify([true, true, false, false, false]), JSON.stringify(whole.error || wholeOf));
   const rb = runChecks([
     { id: 'input-redirect', check: 'grep -c hello < f.txt', expect: { match: '^2$' } },
     { id: 'input-redirect-spaced', check: 'wc -l <   f.txt', expect: { match: '^3$' } },
