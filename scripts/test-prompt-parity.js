@@ -138,6 +138,13 @@ for (const file of MERGE_SITES) check(file + ' carries the merge sentence word f
 // site in the review command's words, so a direct run re-keys the same way.
 const REKEY = 'Two findings that describe one defect under different keys are the one judgment this pass leaves to you: before running the helper, give the later one the earlier one\'s `key` and record the merge in the report\'s dedup notes.';
 for (const file of MERGE_SITES) check(file + ' carries the re-key sentence word for word, once', count(read(file), REKEY) === 1, count(read(file), REKEY) + ' found');
+// Review of #310, R16: the merge helper sets aside a worker's text beside its
+// findings, and each direct-run criteria file that hands lines to it says how
+// to list that text, in one sentence kept word for word at every site.
+const SET_ASIDE = 'A `set aside` line the helper prints on stderr is text a worker wrote beside its findings: list it under "What I could not check", with the worker\'s lens, when it names something the worker could not check, and drop a code fence, a sign-off or a summary of its own findings.';
+const SET_ASIDE_SITES = ['.claude/skills/shared/criteria-code.md', '.claude/skills/shared/criteria-commands.md', '.claude/skills/shared/criteria-copy.md',
+  '.claude/skills/shared/criteria-plan.md', '.claude/skills/shared/criteria-ux.md'];
+for (const file of SET_ASIDE_SITES) check(file + ' carries the set-aside sentence word for word, once', count(read(file), SET_ASIDE) === 1, count(read(file), SET_ASIDE) + ' found');
 const byHand = prompts.filter(([, t]) => /Assign R-IDs yourself|assigns Finding IDs after dedup|combine and renumber their findings/.test(t)).map(([f]) => f);
 check('no prompt file keeps the old by-hand wording of the pass', byHand.length === 0, byHand.join(', '));
 const describers = ['.claude/skills/shared/finding-id-system.md', '.claude/skills/shared/dispatch-format.md', '.claude/skills/shared/hitl-loop.md'];
