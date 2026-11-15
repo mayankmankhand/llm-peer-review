@@ -42,6 +42,8 @@ A compression partway through a stage leaves the session with only the start of 
 
 Two more slips kept coming back although a lesson warned about each: a plan guessed what a failing test would print and guessed wrong in four cycles, and a sentence written into one of the nine review files when all nine needed it slipped through twice. Both now have a check instead of a lesson (#311, #312).
 
+Maintainer only: this release ships under the catch-rate override. Reason: Claude Code updated itself from 2.1.322 to 2.1.325 between the v8.0.20 runs and these; scored with that drift allowed, 8 of 8 stable catches in both, PASS; the owner waived re-measuring on 2026-11-15.
+
 ## v8.0.22 - Stopped Before It Leaves (2026-11-12)
 
 **The folder guard now stops a `cd` out of the project at the command that makes it, instead of one command later (#307).** Before, a command that started with `cd <full path> &&` ran wherever it pointed, Claude's shell stayed in that folder, and the guard stopped only the next command. Maintainer only: a test now ties the docs' upgrade-check counts to the conventions file (#306).
