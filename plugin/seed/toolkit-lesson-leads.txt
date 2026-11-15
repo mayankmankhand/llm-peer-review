@@ -12,6 +12,7 @@ A "nothing defines X" finding must first refute the generic rule that already co
 A "nothing reads this file" claim must check every grep hit, test suites included.
 A JSON escape for an apostrophe does not survive a model typing the command: the one-argument form works only with no apostrophe in the JSON.
 A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.
+A PreCompact hook runs before Claude Code writes the newest record lines; wait for that write before reading.
 A `--stable` render reads the page it replaces, so a trial render is not free: give it every input the first time.
 A `cd` inside one Bash call persists into the next; start every chained command from the repo root.
 A ban written as "X stays in the receipt" needs its scope in the same sentence.
@@ -380,6 +381,7 @@ Silent empty bodies need active detection, not just happy-path returns.
 Skill tool expansions can serve stale command versions.
 Smoke-test a new on-demand skill in default permission mode: only that mode shows a missing permission row.
 Start a headless session with `--setting-sources project,local` and probe its fence with a forbidden write.
+Start a note line in the review digest with words, never `R<n>:`; the hand-off check reads every such line as a verdict.
 Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.
 Subagents do NOT auto-discover project skills.
 Tag vocabulary for prompts:
@@ -387,6 +389,7 @@ Take a step's before run before opening any of its files: two steps this cycle s
 Take each step's before run right after writing its target, before any of its work, even in a research step.
 Tell an unattended test session to judge each call on its own, even after an earlier call was denied.
 Test a false-positive fix on a fixture the old pattern matched, and assert what only the fix changes.
+Test a size limit with a turn that reads many files at once; the last call's size lags what is about to be sent.
 Test an undo instruction by executing it, not by matching its text.
 Test an upgrade finding before the bump by building the scratch plugin at the next version, beside a control already on the new text.
 The bundled prompt audit is not deterministic, so no rerun of it proves a list is complete.
@@ -399,6 +402,7 @@ The seeded rules file reaches plugin projects through C-7, not the seed history:
 The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.
 The self-modification guard blocks adding a permission to `settings.local.json`; ask the user to add it.
 The test gate shows a suite's lines only when it fails; guard an old case by its absence from the failure list.
+To call a script's private functions without editing it, compile its source at its own path with one export line added.
 To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.
 To find who approved a tool call, read the `source` of its `permissionDecision` in the session log.
 To ignore what the default branch already has, compare content from the merge base, not commit ancestry.
