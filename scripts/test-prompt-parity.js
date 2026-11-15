@@ -9,6 +9,10 @@
 // Each of these lives in more than one file on purpose (an inlined fragment, a
 // seed, a command that parses what another file tells a finder to emit), so an
 // edit to one copy and not the others is exactly the drift this suite catches.
+// The 312 cases also watch every paragraph that names the merge helper in its
+// nine files: a sentence not in the record of today's sentences fails, naming
+// the files without it, until it is pinned word for word at all nine (BESIDE)
+// or listed as one file's own with a reason (BESIDE_OWN).
 // Reads the source tree only. Run: node scripts/test-prompt-parity.js
 
 const fs = require('fs');
@@ -147,11 +151,218 @@ const SET_ASIDE_SITES = ['.claude/skills/shared/criteria-code.md', '.claude/skil
   '.claude/skills/shared/criteria-plan.md', '.claude/skills/shared/criteria-ux.md', '.claude/skills/review-full/SKILL.md', '.claude/skills/upgrade/SKILL.md',
   '.claude/skills/security-audit/SKILL.md'];
 for (const file of SET_ASIDE_SITES) check(file + ' carries the set-aside sentence word for word, once', count(read(file), SET_ASIDE) === 1, count(read(file), SET_ASIDE) + ' found');
+
+// Issue #312: the families whose paragraphs are watched for a sentence written
+// at one site only. A family is the text its paragraphs name (`key`), its
+// sites, and its pinned sentences, each held word for word once at its own
+// sites (the family's when it names none). Pin a new sentence here and the case
+// below holds it at every site; another family is one more entry.
+const BESIDE = [{
+  key: 'merge-findings.js',
+  sites: MERGE_SITES,
+  pinned: [{ text: MERGE }, { text: REKEY }, { text: SET_ASIDE, sites: SET_ASIDE_SITES }],
+}];
+// The sentences beside the merge helper on 2026-11-15, as besideRecord printed
+// them: the starting record, written here by hand and never rewritten by a
+// flag. A new sentence gets through only by being pinned in BESIDE above or by
+// an entry in BESIDE_OWN, which takes a written reason.
+const BESIDE_RECORD = {
+  'review': [
+    '0a8ab2cc1b8c', '20f1e9419118', '43a6a112a8cd', '50d3a6461095', '6a411b70b512', '7c691023e320',
+    '87c1e7bf079f', 'a1457a1ed52e', 'b176ff66bb76', 'b8091983461f', 'bc288eea0c71', 'c5387b8e2347',
+    'c9cf16eb0c6f', 'd0bfab10715c', 'de40b42eaaf0',
+  ],
+  'upgrade': [
+    '0e2193630957', '0fa730002003', '1832c3df3549', '1b966b127526', '23f125922c3d', '296bc2afc474',
+    '45abfb947d10', '4a7c32f651ad', '4ef631d0726a', '715dc6a503c4', '77fcdda6b055', '8badd6dea64f',
+    'a10f378c443e', 'a6951961eb16', 'a7b09ebc9b06', 'ad8844dcf355', 'aeee5415c4c4', 'dce56c89d204',
+  ],
+  'criteria-code': ['a69aa4d4cf59'],
+  'criteria-commands': ['a69aa4d4cf59'],
+  'criteria-copy': ['a69aa4d4cf59'],
+  'criteria-plan': ['a69aa4d4cf59'],
+  'criteria-ux': ['a69aa4d4cf59'],
+  'review-full': ['14ab16b60b49', '3a51d981d230'],
+  'security-audit': ['7c8bb8e1e69d', 'b0c9e7f6edc9'],
+};
+// A sentence that belongs to one file only: { file: <short name>, fingerprint,
+// text, why }, where why says why the other sites must not carry it.
+const BESIDE_OWN = [];
+for (const fam of BESIDE) {
+  const off = [];
+  for (const p of fam.pinned) for (const file of p.sites || fam.sites) if (count(read(file), p.text) !== 1) off.push(siteShort(file) + ' (' + count(read(file), p.text) + '): ' + p.text.slice(0, 60));
+  check('312: every sentence pinned beside ' + fam.key + ' is held word for word once at each of its sites', off.length === 0, off.join(' | '));
+}
+
+// The short name a site goes by in the record, the own list and a failure
+// message: the file name without .md, or its folder's name for a SKILL.md.
+function siteShort(rel) {
+  const parts = rel.split('/');
+  const base = parts[parts.length - 1];
+  return base === 'SKILL.md' ? parts[parts.length - 2] : base.replace(/\.md$/, '');
+}
+
+// The sentences beside a family's key in one file's text, each { fp, text }:
+// a paragraph is one line, and a line that names the key loses its list marker
+// and the family's pinned sentences, then is cut into sentences. A sentence
+// ends at . ! or ? (closing marks may follow) before a blank, except after
+// e.g., i.e., etc., vs. or a single letter. Its fingerprint is the first 12
+// hex characters of the SHA-256 of its text with runs of blank space made one.
+// A replay loads this function, besideRecord, besideMisses and BESIDE by
+// compiling this file at its own path with one export line appended and
+// process.exit stubbed, so the line is reached (the #300 lesson).
+function besideSentences(text, family) {
+  const crypto = require('crypto');
+  const out = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    if (!line.includes(family.key)) continue;
+    let rest = line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '');
+    for (const p of family.pinned) rest = rest.split(p.text).join('\n');
+    for (const piece of rest.split('\n')) {
+      const end = /[.!?][)\]*"'`]*(?=\s+\S)/g;
+      let from = 0;
+      let m;
+      const cuts = [];
+      while ((m = end.exec(piece))) {
+        const word = (/\S+$/.exec(piece.slice(from, m.index + 1)) || [''])[0].replace(/^[(*_`"']+/, '');
+        if (/^(?:e\.g|i\.e|etc|vs)\.$/i.test(word) || /^[A-Za-z]\.$/.test(word)) continue;
+        cuts.push(piece.slice(from, m.index + m[0].length));
+        from = m.index + m[0].length;
+      }
+      cuts.push(piece.slice(from));
+      for (const c of cuts) {
+        const norm = c.replace(/\s+/g, ' ').trim();
+        if (norm) out.push({ fp: crypto.createHash('sha256').update(norm).digest('hex').slice(0, 12), text: norm });
+      }
+    }
+  }
+  return out;
+}
+
+// A record of every sentence beside the family's key, from file texts
+// ({ path: text }): { <short name>: [fingerprint, ...] }, sorted.
+function besideRecord(files, family) {
+  const rec = {};
+  for (const site of family.sites) rec[siteShort(site)] = [...new Set(besideSentences(files[site] || '', family).map((s) => s.fp))].sort();
+  return rec;
+}
+
+// The misses in file texts against a record and an own list, in site order:
+// { kind: 'new', file, fp, text, without } for a sentence in neither (`without`
+// names the sites that lack it); { kind: 'no-reason' } for an own entry with no
+// reason; { kind: 'stale' } for an own entry whose sentence is not in its file.
+// A record fingerprint whose sentence is gone is ignored: the record only lets
+// sentences through.
+function besideMisses(files, family, record, own) {
+  const at = {};
+  for (const site of family.sites) at[siteShort(site)] = besideSentences(files[site] || '', family);
+  const has = (short, fp) => (at[short] || []).some((s) => s.fp === fp);
+  const misses = [];
+  const allowed = new Set();
+  for (const o of own) {
+    const entry = { file: o && o.file, fp: o && o.fingerprint, text: o && o.text };
+    if (!o || typeof o.why !== 'string' || !o.why.trim()) misses.push(Object.assign({ kind: 'no-reason' }, entry));
+    else if (!has(o.file, o.fingerprint)) misses.push(Object.assign({ kind: 'stale' }, entry));
+    else allowed.add(o.file + ' ' + o.fingerprint);
+  }
+  for (const short of Object.keys(at)) {
+    const known = new Set(record[short] || []);
+    const seen = new Set();
+    for (const s of at[short]) {
+      if (seen.has(s.fp) || known.has(s.fp) || allowed.has(short + ' ' + s.fp)) continue;
+      seen.add(s.fp);
+      misses.push({ kind: 'new', file: short, fp: s.fp, text: s.text, without: Object.keys(at).filter((o) => o !== short && !has(o, s.fp)) });
+    }
+  }
+  return misses;
+}
+
+// One miss, in one line under the suite's 400-character detail limit.
+function besideDetail(m) {
+  const said = '"' + String(m.text || '').slice(0, 100) + '"';
+  if (m.kind === 'no-reason') return 'own entry ' + m.file + ' ' + m.fp + ' has no reason: ' + said;
+  if (m.kind === 'stale') return 'own entry ' + m.file + ' ' + m.fp + ' names a sentence no longer in its file: ' + said;
+  if (!m.without.length) return said + ' is new in every file but not pinned: pin it in BESIDE';
+  return said + ' is new in ' + m.file + ', not in ' + m.without.join(', ')
+    + '; write it in all and pin it, or add to BESIDE_OWN {file: \'' + m.file + '\', fingerprint: \'' + m.fp + '\', text, why}';
+}
 const byHand = prompts.filter(([, t]) => /Assign R-IDs yourself|assigns Finding IDs after dedup|combine and renumber their findings/.test(t)).map(([f]) => f);
 check('no prompt file keeps the old by-hand wording of the pass', byHand.length === 0, byHand.join(', '));
 const describers = ['.claude/skills/shared/finding-id-system.md', '.claude/skills/shared/dispatch-format.md', '.claude/skills/shared/hitl-loop.md'];
 check('the three fragments that describe the pass name the helper', describers.every(f => read(f).includes('merge-findings.js')), describers.filter(f => !read(f).includes('merge-findings.js')).join(', '));
 check('the helper exists where the sentence points', fs.existsSync(path.join(REPO, '.claude/scripts/merge-findings.js')));
+// Issue #312: a sentence written beside the merge helper at one of the nine
+// files, when the other eight needed it too (#211, and #310's set-aside
+// sentence in review.md, 20 lines above the pinned one). Every sentence in a
+// paragraph that names the helper must be in the record of today's sentences,
+// pinned word for word at every site, or listed as one file's own with a
+// reason. Each case runs in its own try, so a case that throws fails by name.
+{
+  const siteText = () => Object.fromEntries(MERGE_SITES.map((f) => [f, read(f)]));
+  const family = () => BESIDE[0];
+  const MADE_UP = 'A made-up sentence about the helper lands at one file only.';
+  // A copy of the files with `extra` appended to the first paragraph naming the
+  // helper in each file `onlyIn` lists (every site when it is omitted).
+  const withSentence = (extra, onlyIn) => {
+    const files = siteText();
+    for (const f of onlyIn || MERGE_SITES) {
+      const lines = files[f].split('\n');
+      const at = lines.findIndex((l) => l.includes('merge-findings.js'));
+      lines[at] = lines[at].replace(/\s*$/, ' ' + extra);
+      files[f] = lines.join('\n');
+    }
+    return files;
+  };
+  const shown = (misses) => misses.length + ' miss(es): ' + misses.slice(0, 2).map(besideDetail).join(' || ');
+  const attempt = (name, fn) => {
+    try { const [cond, detail] = fn(); check(name, cond, detail); }
+    catch (e) { check(name, false, 'threw: ' + (e && e.message)); }
+  };
+
+  attempt('312: every sentence beside the merge helper is accepted, pinned or listed as one file\'s own', () => {
+    const misses = besideMisses(siteText(), family(), BESIDE_RECORD, BESIDE_OWN);
+    return [misses.length === 0, shown(misses)];
+  });
+  attempt('312: mutation: a new sentence at one file is named with the files without it', () => {
+    const misses = besideMisses(withSentence(MADE_UP, ['.claude/skills/shared/criteria-ux.md']), family(), BESIDE_RECORD, BESIDE_OWN);
+    const m = misses[0] || {};
+    return [misses.length === 1 && m.kind === 'new' && m.file === 'criteria-ux' && m.text === MADE_UP
+      && JSON.stringify(m.without) === JSON.stringify(MERGE_SITES.map(siteShort).filter((s) => s !== 'criteria-ux')) && besideDetail(m).includes('criteria-ux'), shown(misses)];
+  });
+  attempt('312: the 310 slip is caught when its sentence is not in the record', () => {
+    const slip = besideSentences(read('.claude/commands/review.md'), family()).find((s) => s.text.startsWith('Text a specialist wrote beside its findings is not a parse failure either'));
+    if (!slip) return [false, 'the sentence is not beside the helper in review.md'];
+    const record = Object.assign({}, BESIDE_RECORD, { review: (BESIDE_RECORD.review || []).filter((fp) => fp !== slip.fp) });
+    const misses = besideMisses(siteText(), family(), record, BESIDE_OWN);
+    return [misses.length === 1 && misses[0].file === 'review' && misses[0].text === slip.text && misses[0].without.length === 8, shown(misses)];
+  });
+  attempt('312: a reworded sentence counts as new', () => {
+    const files = siteText();
+    files['.claude/commands/review.md'] = files['.claude/commands/review.md'].replace('Text a specialist wrote beside its findings', 'Text a worker wrote beside its findings');
+    const misses = besideMisses(files, family(), BESIDE_RECORD, BESIDE_OWN);
+    return [misses.length === 1 && misses[0].file === 'review' && misses[0].text.startsWith('Text a worker wrote beside its findings'), shown(misses)];
+  });
+  attempt('312: an own entry with no reason is refused', () => {
+    const files = withSentence(MADE_UP, ['.claude/commands/review.md']);
+    const fp = (besideSentences(files['.claude/commands/review.md'], family()).find((s) => s.text === MADE_UP) || {}).fp;
+    const refused = besideMisses(files, family(), BESIDE_RECORD, BESIDE_OWN.concat([{ file: 'review', fingerprint: fp, text: MADE_UP, why: ' ' }]));
+    const let_through = besideMisses(files, family(), BESIDE_RECORD, BESIDE_OWN.concat([{ file: 'review', fingerprint: fp, text: MADE_UP, why: 'only the review command runs this pass' }]));
+    return [!!fp && refused.some((m) => m.kind === 'no-reason') && refused.some((m) => m.kind === 'new' && m.text === MADE_UP) && let_through.length === 0,
+      'refused: ' + shown(refused) + ' | with a reason: ' + shown(let_through)];
+  });
+  attempt('312: an own entry whose sentence is gone is refused as stale', () => {
+    const misses = besideMisses(siteText(), family(), BESIDE_RECORD, BESIDE_OWN.concat([{ file: 'review', fingerprint: '000000000000', text: 'a sentence since removed', why: 'was the review command\'s own' }]));
+    return [misses.length === 1 && misses[0].kind === 'stale' && misses[0].file === 'review', shown(misses)];
+  });
+  attempt('312: a sentence at all nine files that is not pinned still fails', () => {
+    const files = withSentence(MADE_UP);
+    const misses = besideMisses(files, family(), BESIDE_RECORD, BESIDE_OWN);
+    const pinned = Object.assign({}, family(), { pinned: family().pinned.concat([{ text: MADE_UP }]) });
+    const afterPin = besideMisses(files, pinned, BESIDE_RECORD, BESIDE_OWN);
+    return [misses.length === 9 && misses.every((m) => m.kind === 'new' && m.without.length === 0 && /pin/.test(besideDetail(m))) && afterPin.length === 0,
+      shown(misses) + ' | pinned: ' + shown(afterPin)];
+  });
+}
 // Issues #267 and #272: the re-verify round runs through merge-findings.js
 // --verify, and the fix-verifier agent quotes the two sentences of M3 it
 // applies, the trust order and the verifier instruction, word for word and once
