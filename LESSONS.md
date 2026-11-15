@@ -579,3 +579,7 @@
 
 - **Before a standing review page lists the plan lens, check its open seeded findings came from this run's plan.**
 - **To call a script's private functions without editing it, compile its source at its own path with one export line added.**
+
+## Issues 309 and 310 (the quoted folder and the apostrophe check)
+
+- **Start a note line in the review digest with words, never `R<n>:`; the hand-off check reads every such line as a verdict.**
