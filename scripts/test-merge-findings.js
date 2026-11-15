@@ -164,6 +164,40 @@ console.log('\n4. bad input is refused with nothing on stdout');
   const r = run([jsonl(['[1,2,3]'])]);
   check('a JSON line that is not an object is a bad line too', r.status === 1 && r.stdout === '' && /bad_line/.test(r.stderr), r.stdout + ' ' + r.stderr);
 }
+// 310: a reviewer that writes a sentence or a code fence beside its findings
+// has not lost a finding, so the merge sets those lines aside and names them
+// instead of stopping the review. Only a line that cannot be a finding goes:
+// it does not start with { and holds no "severity", and the same reply holds a
+// finding or a NO FINDINGS line.
+{
+  const r = run([jsonl([CODE, UX, 'That is everything I found in the login flow.', '```'])]);
+  const rows = r.rows || [];
+  const named = /^set aside \(line 3\): That is everything I found in the login flow\.$/m.test(r.stderr) && /^set aside \(line 4\): ```$/m.test(r.stderr);
+  const counted = /^merge-findings: 2 raw, 2 merged .*, 0 non-finding line\(s\) skipped, 2 line\(s\) set aside$/m.test(r.stderr);
+  const r2 = run([jsonl(['NO FINDINGS', 'I read every file in the diff and found nothing to flag.'])]);
+  const named2 = /^set aside \(line 2\): I read every file in the diff and found nothing to flag\.$/m.test(r2.stderr) && /1 non-finding line\(s\) skipped, 1 line\(s\) set aside$/m.test(r2.stderr);
+  check('310: text beside the findings is set aside and named on stderr',
+    r.status === 0 && rows.length === 2 && rows[0].id === 'R1' && named && counted && r2.status === 0 && r2.stdout === '' && named2,
+    JSON.stringify([r.status, r.stderr, r2.status, r2.stderr]));
+}
+{
+  // Each of these could hide a lost finding, so each still stops the run.
+  const broken = run([jsonl([CODE, '{"severity": "warn", "what": "Should fix. cut off'])]);
+  check('310: a line that starts like a finding and cannot be read is still a bad line', broken.status === 1 && broken.stdout === '' && /"bad_line"/.test(broken.stderr) && /"line":2/.test(broken.stderr), broken.stdout + ' ' + broken.stderr);
+  const after = run([jsonl([CODE, 'Here is one more: ' + JSON.stringify(UX)])]);
+  check('310: a line holding a finding after other text is a bad line', after.status === 1 && after.stdout === '' && /"bad_line"/.test(after.stderr) && /"line":2/.test(after.stderr), after.stdout + ' ' + after.stderr);
+  const prose = run([jsonl(['I looked at the login flow.', 'Nothing in it seems wrong to me.'])]);
+  check('310: text with no finding and no NO FINDINGS line is still a bad line', prose.status === 1 && prose.stdout === '' && /"bad_line"/.test(prose.stderr) && /"line":1/.test(prose.stderr), prose.stdout + ' ' + prose.stderr);
+  // --shards and --verify read a file the runner wrote from merged findings,
+  // so a stray line there is a fault, never a reviewer's aside. Both parse the
+  // file before reading their other inputs, so no receipts or scope are needed.
+  const stray = jsonl([CODE, 'That is everything I found.']);
+  const shards = run(['--shards', stray, '--receipts', path.join(sandbox, 'no-receipts'), '--out', path.join(sandbox, 'no-shards')]);
+  const verify = run(['--verify', stray, '--receipts', path.join(sandbox, 'no-receipts'), '--scope', path.join(sandbox, 'no-scope.json'), '--out', path.join(sandbox, 'no-verify'), '--mechanical', 'R1']);
+  check('310: shards and verify still refuse any stray line',
+    shards.status === 1 && /"bad_line"/.test(shards.stderr) && /"line":2/.test(shards.stderr) && verify.status === 1 && /"bad_line"/.test(verify.stderr) && /"line":2/.test(verify.stderr),
+    shards.stderr + ' | ' + verify.stderr);
+}
 {
   const r = run([jsonl([Object.assign({}, CODE, { severity: 'critical' })])]);
   check('an unknown severity is a bad line', r.status === 1 && r.stdout === '' && /bad_line/.test(r.stderr) && /severity/.test(r.stderr), r.stdout + ' ' + r.stderr);

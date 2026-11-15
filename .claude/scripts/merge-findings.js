@@ -39,6 +39,13 @@
 // rows of its own while a file argument runs under the script's own row. A
 // `NO FINDINGS` line and a `NOT CHECKED: ...` disclosure line are skipped and
 // counted; blank lines are ignored; a leading byte order mark is dropped.
+// In this merge mode only (issue 310), a line that cannot be a finding is set
+// aside rather than refused: one that does not start with { (after trimming)
+// and holds no "severity", in a text that also holds a finding or a
+// NO FINDINGS line. A reviewer's closing sentence or a code fence is such a
+// line. Each is printed on stderr as `set aside (line N): <text>` and counted
+// in the summary line. --shards and --verify read a file the runner wrote, so
+// they stay strict.
 //
 // Output, on stdout: one JSON object per line, the merged findings sorted
 // block, warn, suggest (stable within one severity, so input order holds) and
@@ -71,8 +78,10 @@
 //
 // stderr: one summary line,
 //   merge-findings: N raw, M merged (K merges), B block / W warn / S suggest, D non-finding line(s) skipped
-// and before it, one warning line per finding that breaks a countable rule of
-// the finding contract (.claude/skills/shared/finding-contract.md; issue #221):
+// which ends `, A line(s) set aside` when any line was set aside (above).
+// Before it come one `set aside` line per such line and one warning line per
+// finding that breaks a countable rule of the finding contract
+// (.claude/skills/shared/finding-contract.md; issue #221):
 //   merge-findings: line N (<key>): what 24/18 words; hedge "it appears"
 // The rules checked are the word caps (what 18, context 22, fix 20, and 40 of
 // open prose before the fix line), the eleven banned hedges, and a `what` that
@@ -142,7 +151,11 @@
 //
 // A line that is not a JSON object, or carries an unknown severity, stops the
 // run: exit 1, nothing on stdout, and on stderr one JSON object
-// {"error":"bad_line","line":<n>,"reason":"..."}. A missing argument, an extra
+// {"error":"bad_line","line":<n>,"reason":"..."}. In the merge mode that holds
+// for every line the rule above does not set aside: one that starts with {,
+// one that holds "severity" after other text, and any non-finding text in a
+// reply with no finding and no NO FINDINGS line, since each could be a finding
+// that was lost. A missing argument, an extra
 // one, or a file that cannot be read exits 1 the same way with "usage" or
 // "not_found". Dependency-free, like every script here, and it names no
 // command: the plugin build rewrites command names in prompts, never in
@@ -186,18 +199,26 @@ function badInput(error, line, reason) {
 // `findings[i]` (kept beside the finding, never on it: `sources` carries each
 // line as written), `texts[i]` its line as written (trimmed; what --shards
 // copies), plus the count of non-finding lines (NO FINDINGS, NOT CHECKED)
-// skipped on the way.
-function parseLines(text) {
+// skipped on the way. With `options.setAside` (the merge mode only, issue
+// 310), a line that cannot be a finding is collected in `setAside` as
+// { line, text } instead of refused, under the rule in the header; without it
+// `setAside` is always empty and every such line is a bad_line, as before.
+function parseLines(text, options) {
+  const lenient = !!(options && options.setAside);
   const findings = [];
   const lineNumbers = [];
   const texts = [];
+  const setAside = [];
   let skipped = 0;
+  let noFindingsLine = false;
   const lines = text.replace(/^﻿/, '').split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     const n = i + 1;
     if (line === '') continue;
-    if (line === 'NO FINDINGS' || line.startsWith('NOT CHECKED:')) { skipped++; continue; }
+    if (line === 'NO FINDINGS' || line.startsWith('NOT CHECKED:')) { skipped++; noFindingsLine = noFindingsLine || line === 'NO FINDINGS'; continue; }
+    // Neither the start of a finding nor one carried later in the line.
+    if (lenient && !line.startsWith('{') && line.indexOf('"severity"') === -1) { setAside.push({ line: n, text: line }); continue; }
     let obj;
     try { obj = JSON.parse(line); } catch (e) { throw badInput('bad_line', n, 'line ' + n + ' is not JSON: ' + e.message); }
     if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) throw badInput('bad_line', n, 'line ' + n + ' is not a JSON object');
@@ -209,7 +230,13 @@ function parseLines(text) {
     lineNumbers.push(n);
     texts.push(line);
   }
-  return { findings, skipped, lines: lineNumbers, texts };
+  // Text alone, with no finding and no NO FINDINGS line, may be a reply that
+  // lost its findings: refused at its first line, as the strict modes do.
+  if (setAside.length && findings.length === 0 && !noFindingsLine) {
+    const first = setAside[0].line;
+    throw badInput('bad_line', first, 'line ' + first + ' is not JSON, and the text holds no finding and no NO FINDINGS line, so it may be a reply whose findings were lost');
+  }
+  return { findings, skipped, lines: lineNumbers, texts, setAside };
 }
 
 const rankOf = (f) => SEVERITY_RANK[String(f.severity).toLowerCase()];
@@ -780,12 +807,15 @@ function checkVerdicts(tier, ids, returns) {
   return out;
 }
 
-function summaryLine(raw, merged, skipped) {
+// The set-aside count is added only when a line was set aside, so the line an
+// ordinary run prints is unchanged.
+function summaryLine(raw, merged, skipped, asideCount) {
   const count = (sev) => merged.filter((m) => m.severity === sev).length;
   const merges = raw - merged.length;
   return 'merge-findings: ' + raw + ' raw, ' + merged.length + ' merged (' + merges + ' merge' + (merges === 1 ? '' : 's') + '), '
     + count('block') + ' block / ' + count('warn') + ' warn / ' + count('suggest') + ' suggest, '
-    + skipped + ' non-finding line(s) skipped';
+    + skipped + ' non-finding line(s) skipped'
+    + (asideCount ? ', ' + asideCount + ' line(s) set aside' : '');
 }
 
 function main(argv) {
@@ -824,7 +854,8 @@ function main(argv) {
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch (e) { fail('not_found', null, file + ' could not be read: ' + e.message); }
   let parsed;
-  try { parsed = parseLines(text); } catch (e) { fail(e.error || 'bad_line', e.line, e.message); }
+  try { parsed = parseLines(text, { setAside: true }); } catch (e) { fail(e.error || 'bad_line', e.line, e.message); }
+  for (const a of parsed.setAside) process.stderr.write('set aside (line ' + a.line + '): ' + a.text + '\n');
   parsed.findings.forEach((f, i) => {
     const warning = contractWarning(f, parsed.lines[i]);
     if (warning) process.stderr.write(warning + '\n');
@@ -832,7 +863,7 @@ function main(argv) {
   const merged = mergeFindings(parsed.findings);
   for (const w of citationWarnings(merged, opts)) process.stderr.write(w + '\n');
   if (merged.length) process.stdout.write(merged.map((m) => JSON.stringify(m)).join('\n') + '\n');
-  process.stderr.write(summaryLine(parsed.findings.length, merged, parsed.skipped) + '\n');
+  process.stderr.write(summaryLine(parsed.findings.length, merged, parsed.skipped, parsed.setAside.length) + '\n');
 }
 
 // --shards <findings.jsonl or folder> --receipts <dir> --out <dir> [--drop R3,R7] [--root/--rev/--base]
