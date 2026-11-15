@@ -1692,6 +1692,33 @@ section('311 warn: the plan lint warns about a test line that guesses its failur
     !!across.warnings && exactlyOne(across, 'across', /no room on the line/) && across.forId('apart').length === 0,
     one(across.counts + ' ' + JSON.stringify(across.warnings) + across.r.stderr));
 
+  // Review of #311 (R2, R12, R13): the heavy cross AVA and Playwright print is
+  // a failure word, a mocha run is not a test line (its default reporter prints
+  // no failure word), a word inside a group that wraps the name still runs into
+  // it, and a cross mark written inside a character class counts.
+  const marks = lintOf([
+    { id: 'heavy', before: { match: la('x\\.js: exit 1') + la('✘[^\\n]*the discount rounds down') } },
+    { id: 'heavy-escaped', before: { match: '\\u2718[^\\n]*the discount rounds down' } },
+    { id: 'mocha', check: 'npx mocha', before: { match: '1\\) the discount rounds down' } },
+  ]);
+  check('311 review: a heavy cross counts as a failure word, and a mocha run is not a test line',
+    !!marks.warnings && marks.warnings.length === 0,
+    one(marks.counts + ' ' + JSON.stringify(marks.warnings) + marks.r.stderr));
+  const wrapped = lintOf([
+    { id: 'wrapped', before: { match: la('(?:FAIL +the discount rounds down)') } },
+    { id: 'nested', before: { match: la('((?:FAIL|not ok) +)the discount rounds down') } },
+  ]);
+  check('311 review: a failure word inside a group that wraps the name still draws the warning',
+    !!wrapped.warnings && exactlyOne(wrapped, 'wrapped', /no room on the line/) && exactlyOne(wrapped, 'nested', /no room on the line/),
+    one(wrapped.counts + ' ' + JSON.stringify(wrapped.warnings) + wrapped.r.stderr));
+  const classed = lintOf([
+    { id: 'class', before: { match: la('x\\.js: exit 1') + la('[✕✗][^\\n]*the discount rounds down') } },
+    { id: 'class-joined', before: { match: '[✕✗] +the discount rounds down' } },
+  ]);
+  check('311 review: a cross mark inside a character class counts as a failure word',
+    !!classed.warnings && classed.forId('class').length === 0 && exactlyOne(classed, 'class-joined', /no room on the line/),
+    one(classed.counts + ' ' + JSON.stringify(classed.warnings) + classed.r.stderr));
+
   // The plan command's own example is what plans copy: a warning that fired on
   // it would fire on every plan. Read the first {"match": ...} example in its
   // "The stated failure" paragraph and lint it as an npm test target.

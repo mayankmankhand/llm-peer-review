@@ -2188,8 +2188,10 @@ function lintStep(st, root, env) {
 
 // Whether one segment's words run a test suite: the test forms the guard
 // allows (npmRule and the others above), without their lint, typecheck, vet,
-// check and clippy forms, which print no failed case.
-const TEST_NPX = new Set(['jest', 'vitest', 'mocha', 'ava', 'tap', 'playwright']);
+// check and clippy forms, which print no failed case. mocha is left out too:
+// its default reporter numbers a failed case and prints no failure word, so
+// every correct line would warn (review of #311, R2).
+const TEST_NPX = new Set(['jest', 'vitest', 'ava', 'tap', 'playwright']);
 function isTestRun(words) {
   const [cmd, a, b, c, d] = words;
   switch (cmd) {
@@ -2209,10 +2211,17 @@ function isTestRun(words) {
 // A failure word is FAIL or FAILED in capitals as a whole word (a following
 // (?:ED)? counts with it), `not ok` (its blank may be written \s, with a
 // quantifier), or one of the cross marks test tools print, as the character
-// or its \u escape. A lowercase failed, failing or failure is not one, so a
-// case name such as "lint warns on a test line with no failure word" holds none.
-const CROSS_MARKS = ['✕', '✗', '×', '✖', '\\u2715', '\\u2717', '\\u00d7', '\\u00D7', '\\u2716'];
+// or its \u escape (the heavy cross is AVA's and Playwright's), and a
+// character class holding one ([✕✗]). A lowercase failed, failing or failure
+// is not one, so a case name such as "lint warns on a test line with no
+// failure word" holds none.
+const CROSS_MARKS = ['✕', '✗', '×', '✖', '✘', '\\u2715', '\\u2717', '\\u00d7', '\\u00D7', '\\u2716', '\\u2718'];
 function failureWordAt(src, i) {
+  if (src[i] === '[' && src[i + 1] !== '^') {
+    const end = atomEnd(src, i);
+    const body = src.slice(i, end);
+    return CROSS_MARKS.some((x) => body.includes(x)) ? end - i : 0;
+  }
   // A word starts after a non-word character, or after an escape such as \b or \s.
   const prev = src[i - 1];
   const boundary = i === 0 || !/[A-Za-z0-9_]/.test(prev) || src[i - 2] === '\\';
@@ -2283,38 +2292,46 @@ function skipQuantifier(src, j) {
   return m ? j + m[0].length : j;
 }
 
+// The index of the ) that closes the group `j` sits in (the part's end when
+// none does), stepping over the groups and classes on the way.
+function groupClose(src, j) {
+  for (let depth = 0; j < src.length; j = atomEnd(src, j)) {
+    if (src[j] === '(') depth++;
+    else if (src[j] === ')') { if (depth === 0) return j; depth--; }
+  }
+  return j;
+}
+
 // For one part: 'none' when it holds no failure word; 'joined' with the text
 // that follows when its first failure word runs into text with no room on the
 // same line; 'ok' otherwise. Only the first failure word counts, so a case
 // name that holds one (`a failing suite shows every FAIL line`) is not read as
-// a second. From that word the reading steps over the rest of the group of
-// alternatives it sits in, a ?, blanks, ` +`, `\s+`, `\s*` and a colon; next
-// must come room on the same line ([^\n]* or [^\n]+, .* or .+) or the part's
-// end. [\s\S]* is not room on the same line.
+// a second. From that word the reading steps over a ?, blanks, ` +`, `\s+`,
+// `\s*` and a colon; a bar ends the word's alternative, so the rest of the
+// group it sits in is stepped over, and so is the closing ) of a group around
+// the word, so (?:FAIL|not ok) reads as one word while (?:FAIL +<name>) still
+// runs into the name (review of #311, R12). Next must come room on the same
+// line ([^\n]* or [^\n]+, .* or .+) or the part's end. [\s\S]* is not room on
+// the same line.
 function partShape(src) {
   const open = [];
   for (let i = 0; i < src.length;) {
     if (src[i] === '(') { open.push(i); i++; continue; }
     if (src[i] === ')') { open.pop(); i++; continue; }
     if (src[i] === '\\' || src[i] === '[') {
-      const len = src[i] === '\\' ? failureWordAt(src, i) : 0;   // a \u cross mark
+      const len = failureWordAt(src, i);   // a \u cross mark, or a class holding one
       if (!len) { i = atomEnd(src, i); continue; }
     }
     const len = failureWordAt(src, i);
     if (!len) { i++; continue; }
     let j = i + len;
-    if (open.length) {
-      // The rest of the group the word sits in: to its unmatched ).
-      for (let depth = 0; j < src.length; j = atomEnd(src, j)) {
-        if (src[j] === '(') depth++;
-        else if (src[j] === ')') { if (depth === 0) break; depth--; }
-      }
-      j = skipQuantifier(src, j + 1);
-    }
+    let around = open.length;   // groups still open around the word
     for (;;) {
       if (src.startsWith('\\s', j)) j = skipQuantifier(src, j + 2);
-      else if (src[j] === ' ' || src[j] === ':' || src[j] === ')') j = skipQuantifier(src, j + 1);
+      else if (src[j] === ' ' || src[j] === ':') j = skipQuantifier(src, j + 1);
       else if (src[j] === '?') j++;
+      else if (src[j] === '|' && around > 0) j = groupClose(src, j);
+      else if (src[j] === ')' && around > 0) { around--; j = skipQuantifier(src, j + 1); }
       else break;
     }
     if (j >= src.length || /^(?:\[\^(?:\\n|\\r\\n|\\n\\r)\]|\.)[*+]/.test(src.slice(j))) return { shape: 'ok' };
