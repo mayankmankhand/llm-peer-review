@@ -136,6 +136,7 @@ function makeFixture() {
   write(src, 'scripts/session-start.js', '// the SessionStart hook\n');
   write(src, 'scripts/push-guard.js', '// the PreToolUse hook\n');
   write(src, 'scripts/folder-guard.js', '// the folder guard hook\n');
+  write(src, 'scripts/quote-guard.js', '// the apostrophe check hook\n');
   write(src, 'scripts/package.json', '{ "name": "fixture", "dependencies": {} }\n');
   write(src, 'scripts/package-lock.json', '{ "lockfileVersion": 3 }\n');
   write(src, 'scripts/node_modules/left-pad/index.js', 'module.exports = 1;\n');
@@ -383,8 +384,15 @@ check('the PreToolUse hook runs push-guard.js and blocks when it fails', pushEnt
 const folderEntry = entryRunning('folder-guard.js');
 const folderHooks = folderEntry.hooks || [];
 check('282: the PreToolUse folder guard runs folder-guard.js on Bash, Agent, Task, Skill, Grep and Glob and never blocks on its own failure',
-  guardEntries.length === 2 && folderEntry.matcher === 'Bash|Agent|Task|Skill|Grep|Glob' && folderHooks.length === 1 && folderHooks[0].type === 'command'
+  guardEntries.length === 3 && folderEntry.matcher === 'Bash|Agent|Task|Skill|Grep|Glob' && folderHooks.length === 1 && folderHooks[0].type === 'command'
     && folderHooks[0].command === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/folder-guard.js"' && folderHooks[0].timeout === 10 && folderHooks[0].onFailure === undefined,
+  JSON.stringify(hooks.hooks.PreToolUse));
+// The apostrophe check (#310) fails open too: a crash or a hang lets the command run.
+const quoteEntry = entryRunning('quote-guard.js');
+const quoteHooks = quoteEntry.hooks || [];
+check('310: the PreToolUse apostrophe check runs quote-guard.js on Bash and never blocks on its own failure',
+  quoteEntry.matcher === 'Bash' && quoteHooks.length === 1 && quoteHooks[0].type === 'command'
+    && quoteHooks[0].command === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/quote-guard.js"' && quoteHooks[0].timeout === 10 && quoteHooks[0].onFailure === undefined,
   JSON.stringify(hooks.hooks.PreToolUse));
 const stopEntries = hooks.hooks.Stop || [];
 const stopHooks = stopEntries.flatMap(h => h.hooks || []);
@@ -1066,6 +1074,12 @@ fs.rmSync(folderAbs);
 let uFolder;
 try { uFolder = unresolvedOf(); } finally { fs.writeFileSync(folderAbs, folderText); }
 check('282: a source without scripts/folder-guard.js is reported unresolved for the hook', uFolder.includes('hooks/hooks.json: missing source scripts/folder-guard.js'), uFolder.join('; '));
+const quoteAbs = path.join(cp.src, 'scripts', 'quote-guard.js');
+const quoteText = fs.readFileSync(quoteAbs);
+fs.rmSync(quoteAbs);
+let uQuote;
+try { uQuote = unresolvedOf(); } finally { fs.writeFileSync(quoteAbs, quoteText); }
+check('310: a source without scripts/quote-guard.js is reported unresolved for the hook', uQuote.includes('hooks/hooks.json: missing source scripts/quote-guard.js'), uQuote.join('; '));
 check('the retired rows seed is exempt from the old-layout check', !unresolvedOf().some(x => x.startsWith('seed/retired-permission-rows.txt')) && read(REPO, 'seed/retired-permission-rows.txt').includes('.claude/scripts/'));
 const cpInv = lib.inventory(cp.src);
 const seedHits = (text, rel) => lib.seedProblems(rel || 'seed/CLAUDE.md', text, cpInv);

@@ -135,6 +135,22 @@ check('310: input that is not a tool call gets no answer and exit 0', (function 
   return r.status === 0 && (r.stdout || '').trim() === '';
 })());
 
+console.log('\n4. the check is switched on');
+// Step 5 of the #310 plan: shipped in the plugin's hook list when the replay
+// cleared it, or kept to this repository's settings when it did not. Either
+// way a PreToolUse entry for Bash must run the script, or it checks nothing.
+function runsGuard(file) {
+  let data = null;
+  try { data = JSON.parse(fs.readFileSync(path.join(ROOT, file), 'utf8')); } catch (e) { return false; }
+  const entries = (data && data.hooks && Array.isArray(data.hooks.PreToolUse)) ? data.hooks.PreToolUse : [];
+  return entries.some(function (e) {
+    return e && typeof e.matcher === 'string' && e.matcher.split('|').indexOf('Bash') !== -1 &&
+      (Array.isArray(e.hooks) ? e.hooks : []).some(function (h) { return h && typeof h.command === 'string' && /quote-guard\.js/.test(h.command); });
+  });
+}
+check('310: the check is switched on: the plugin hook list or this repository settings run it',
+  runsGuard(path.join('plugin', 'hooks', 'hooks.json')) || runsGuard(path.join('.claude', 'settings.json')));
+
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.'); process.exit(0); }
 console.log(failures.length + ' FAILED, ' + passed + ' passed:');

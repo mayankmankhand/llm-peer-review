@@ -71,6 +71,10 @@
 //     (Bash, a helper launch, a skill, a search) and as a Stop hook, so a call
 //     or the end of a turn away from the project root is stopped. It has no
 //     onFailure: a crash or a timeout lets the call run, as without the guard.
+//     The apostrophe check (#310) runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/
+//     quote-guard.js"` as a third PreToolUse hook on Bash and blocks a command
+//     whose single-quoted text an apostrophe cuts. It has no onFailure either,
+//     for the same reason, and does nothing when TK_QUOTE_GUARD is off.
 //   * managed-paths.json. The repo-relative paths a copy-install manages, so
 //     the plugin's setup script can migrate an install that predates the
 //     manifest (issue #138 shipped the manifest in v5.5.0), and the content
@@ -140,6 +144,7 @@ const KEEP_PROJECT_PATHS = [
 const SESSION_START_SCRIPT = 'session-start.js';
 const PUSH_GUARD_SCRIPT = 'push-guard.js';
 const FOLDER_GUARD_SCRIPT = 'folder-guard.js';
+const QUOTE_GUARD_SCRIPT = 'quote-guard.js';
 // The stamped files (#183), by emitted path: the three files
 // scripts/setup/bump-version.sh stamps in the source. Each emitted copy gets the
 // build's version in its stamp, by the replacement bump-version.sh makes (the
@@ -714,7 +719,7 @@ function build(src, version) {
     version,
     author: { name: 'Mayank Mankhand' },
   }, null, 2) + '\n');
-  for (const script of [SESSION_START_SCRIPT, PUSH_GUARD_SCRIPT, FOLDER_GUARD_SCRIPT]) {
+  for (const script of [SESSION_START_SCRIPT, PUSH_GUARD_SCRIPT, FOLDER_GUARD_SCRIPT, QUOTE_GUARD_SCRIPT]) {
     if (!inv.scripts.some(s => s.rel === script)) unresolved.push('hooks/hooks.json: missing source scripts/' + script);
   }
   // The folder guard (#282), one script for both events. It always exits 0
@@ -742,6 +747,12 @@ function build(src, version) {
         // launch's older name, and Grep and Glob exist on some platforms only.
         matcher: 'Bash|Agent|Task|Skill|Grep|Glob',
         hooks: [Object.assign({}, folderGuard)],
+      }, {
+        // The apostrophe check (#310). It always exits 0 and has no
+        // onFailure, so a crash or a hang lets the command through: a missed
+        // cut costs one failed command, a stuck check would cost every one.
+        matcher: 'Bash',
+        hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/' + QUOTE_GUARD_SCRIPT + '"', timeout: 10 }],
       }],
       Stop: [{ hooks: [Object.assign({}, folderGuard)] }],
     },
