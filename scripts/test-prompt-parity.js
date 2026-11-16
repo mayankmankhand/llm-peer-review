@@ -428,6 +428,13 @@ check('merge-check.js reads a kept line in that key, file and text apart', kept.
 for (const [file, text] of [['decision-checker.md', CHECKER], ['merge-rules.md', RULES], ['merge-check.js', MC_SRC]]) check(file + ' names the decisions file\'s two headings', text.includes('## This PR') && text.includes('## Landing '), file);
 check('merge.md dispatches the decision-checker by name with no model, and document.md names /merge', /subagent_type=decision-checker/.test(MERGE_CMD) && /no model parameter/.test(MERGE_CMD) && DOC.includes('`/merge <N>`'));
 
+// The review command copies the browser helper's port list; hold the two equal.
+{
+  const inReview = ((/for p in ((?:\d+ ?)+); do/.exec(read('.claude/commands/review.md')) || [])[1] || '').trim().split(/\s+/).filter(Boolean);
+  const inHelper = ((/defaultPorts:\s*\[([^\]]+)\]/.exec(read('.claude/scripts/browse.js')) || [])[1] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  check('the review command probes the same ports as the browser helper', inReview.length > 0 && inReview.join(' ') === inHelper.join(' '), inReview.join(' ') + ' against ' + inHelper.join(' '));
+}
+
 console.log('\n6. the check-at-source sentence (#241)');
 // Issue #241: one sentence in the seeded rules file's Self-Service paragraph
 // says a claim with a checkable source is checked there before it is stated.
