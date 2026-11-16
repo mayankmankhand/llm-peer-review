@@ -33,7 +33,7 @@ You type `/explore`, approve the plan, and the rest chains (M14): `/explore` -> 
 
 ## Self-Service
 
-If Claude can run it (tests, builds, dev servers, installs, status checks), Claude runs it and reports. A claim with a checkable source (a link, a file, a command, a version, earlier work) is checked there before it is stated; one that cannot be checked says it comes from memory. The user is asked only for screenshots Claude cannot take itself, judgment calls, and destructive actions.
+If Claude can run it (tests, builds, dev servers, installs, status checks), Claude runs it and reports. A claim with a checkable source (a link, a file, a command, a version, earlier work) is checked there before it is stated; one that cannot be checked says it comes from memory. A recommendation is checked the same way: before proposing a fix, a follow-up issue, a test or a setting, confirm that the problem is real, still open and not already answered by what is on hand, and say what was checked. The user is asked only for screenshots Claude cannot take itself, judgment calls, and destructive actions.
 
 ## Your Files
 
