@@ -180,7 +180,7 @@ The `/audit-html` skill applies the same principle to the project's own markdown
 ### Command-Specific Rules
 
 **When Running any /review-* command or skill:**
-- Output a written report using the format in the corresponding skill's `SKILL.md` (`.claude/skills/review-*/SKILL.md`)
+- Output a written report using the format in the report rules (`.claude/skills/shared/report-format.md`, which each review skill loads through the `report-rules` skill)
 - Specialist reviewers never modify files themselves - their job is to report findings into the loop
 - Nothing waits for human approval: after the M2 audit (preceded by dedup on an orchestrated `/review`; a direct `/review-*` run that fanned out sub-agents dedups their combined findings first, and a single-pass run has nothing to dedup), surviving findings flow into the auto-fix loop below, unless this run was started with "report only" (M10)
 - Use the "Use this when / Don't use this when" guidance at the top of each command to pick the right one

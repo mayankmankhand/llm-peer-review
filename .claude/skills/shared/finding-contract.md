@@ -64,7 +64,7 @@ These show the two-sentence contract in practice across different review types. 
 
 - **R1** 🚫 `auth/login.ts:42` - Blocks. Failed logins leak a live session token into the console log.
   - Anyone who can read the support log dashboard can reuse those tokens while they are still valid.
-  - **Fix:** One line: log that the attempt failed, never the payload. Ten minutes, or leave it and the tokens keep landing in logs.
+  - **Fix:** One line: log that the attempt failed, never the payload. Ten minutes, or leave the tokens in logs.
 
 Sentence one is 12 words and names the harm with a verb from the list. Sentence two answers *who is hit*. The fix line carries a size and both options. Nothing restates anything.
 

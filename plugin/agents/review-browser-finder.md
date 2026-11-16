@@ -1,6 +1,6 @@
 ---
 name: review-browser-finder
-description: Browser QA review finder, dispatched by /tk:review when a visual change meets a running dev server; the direct /tk:review-browser run is single-pass and does not dispatch it. Preloads the browser criteria and the dispatch contract, reads the project context and file excerpts in the dispatching prompt, and returns findings as JSONL. Declares no file-editing tools; never audits its own findings.
+description: Browser QA review finder, dispatched by /tk:review when a visual change, or a plan's behaviour line, meets a dev server that answers or that it can start; the direct /tk:review-browser run is single-pass and does not dispatch it. Preloads the browser criteria and the dispatch contract, reads the project context and file excerpts in the dispatching prompt, and returns findings as JSONL. Declares no file-editing tools; never audits its own findings.
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: medium
