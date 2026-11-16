@@ -246,7 +246,7 @@ Rendered exactly as the template's "Audited out" section defines it - placement,
 - Blocks: X | Warns: X | Suggests: X (audit survivors)
 - Deduplicated findings: X (Y raw findings from specialists; both from the helper's `merge-findings:` stderr line, never recounted; M16); audited out: Z
 
-End the report with one line so the user knows what happens next: _"The loop now auto-fixes and re-verifies the surviving findings (auto loop in `.claude/skills/shared/hitl-loop.md`); saying 'report only' at the start would have kept this run report-first."_
+End the report with one line so the user knows what happens next. On a "report only" run: _"Report only, as you asked: nothing was fixed on this run. The next run goes back to fixing automatically."_ On any other run: _"The loop now auto-fixes and re-verifies the surviving findings (auto loop in `.claude/skills/shared/hitl-loop.md`); saying 'report only' at the start would have kept this run report-first."_
 
 </output_format>
 

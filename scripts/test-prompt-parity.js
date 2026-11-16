@@ -187,7 +187,9 @@ const BESIDE_RECORD = {
 };
 // A sentence that belongs to one file only: { file: <short name>, fingerprint,
 // text, why }, where why says why the other sites must not carry it.
-const BESIDE_OWN = [];
+const BESIDE_OWN = [
+  { file: 'security-audit', fingerprint: '644e30117431', text: "Paste the dispatch contract (`.claude/skills/dispatch-contract/SKILL.md` with `.claude/skills/shared/dispatch-format.md`), the severity anchors (`.claude/skills/shared/severity-anchors.md`) and the finding contract (`.claude/skills/shared/finding-contract.md`) into each one's prompt with the How to Audit steps for its area (steps 1 and 5 for input, injection and external calls; step 2 for auth and access control; steps 3 and 4 for secrets and crypto) below, and tell it to edit no file: its findings then come back as JSONL with the receipts M2's first tier runs.", why: 'only the deep security audit pastes these files into general helpers of its own from this paragraph' },
+];
 for (const fam of BESIDE) {
   const off = [];
   for (const p of fam.pinned) for (const file of p.sites || fam.sites) if (count(read(file), p.text) !== 1) off.push(siteShort(file) + ' (' + count(read(file), p.text) + '): ' + p.text.slice(0, 60));

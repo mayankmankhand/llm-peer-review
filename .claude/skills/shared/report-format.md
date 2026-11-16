@@ -37,7 +37,7 @@ Derive it mechanically from the findings, never by gut feel:
 - Files reviewed: X
 - Blocks: X | Warns: X | Suggests: X
 
-End the report with one line so the user knows what happens next: _"Fixes for surviving findings apply automatically and are re-verified per the auto loop in `.claude/skills/shared/hitl-loop.md`; saying 'report only' at the start would have kept this run report-first, and works the same on any future run."_
+End the report with one line so the user knows what happens next. On a "report only" run: _"Report only, as you asked: nothing was fixed on this run. The next run goes back to fixing automatically."_ On any other run: _"Fixes for surviving findings apply automatically and are re-verified per the auto loop in `.claude/skills/shared/hitl-loop.md`; saying 'report only' at the start would have kept this run report-first, and works the same on any future run."_
 
 ## Where the report is written
 
