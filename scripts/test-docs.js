@@ -184,7 +184,7 @@ function conventionCounts(text) {
 // an edit above them does not break the test. Each must occur exactly once in
 // its file: a phrase that is missing (the sentence was reworded) or doubled
 // fails by its name, so a count can never drop out of the check unnoticed.
-// Deliberately not a scan of every doc: AGENT-SETUP.md's v8.0.20 notes say
+// Deliberately not a scan of every doc: CHANGELOG.md's v8.0.20 notes say
 // "two run-once checks" as history, which is true of that release.
 const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
   'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];

@@ -4,7 +4,7 @@ Shared reference for `/merge`, `/document`, `/worktree`, and the branch-rename s
 
 ## Why
 
-A branch is blind to what lands on main after it was cut. A conflict fix made while landing it can drop that work, or its own, and a squash or a rebase hides the fix from history (issue #232: in the replays, one whole-file "keep mine" fix dropped 9 lines of two earlier landings, including changes that never conflicted). So every landing is checked, keyed on the branch's cut point.
+A branch is blind to what lands on main after it was cut. A conflict fix made while landing it can drop that work, or its own, and a squash or a rebase hides the fix from history (replayed in scratch repositories, one whole-file "keep mine" fix dropped 9 lines of two earlier landings, including changes that never conflicted). So every landing is checked, keyed on the branch's cut point.
 
 ## The cut point
 
