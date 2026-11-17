@@ -580,3 +580,9 @@
 ## Issues 309 and 310 (the quoted folder and the apostrophe check)
 
 - **Start a note line in the review digest with words, never `R<n>:`; the hand-off check reads every such line as a verdict.**
+
+## The two-reads cycle (a prompt audit and a correction ranking in one plan)
+
+- **When two reads of the same files finish in one session, offer one merged plan before drafting anything to file.**
+- **A step that applies only sometimes says where the reader looks to tell that it does.**
+- **Once every step saves a checkpoint, a final what-changed check compares against the start commit, never the tree.**
