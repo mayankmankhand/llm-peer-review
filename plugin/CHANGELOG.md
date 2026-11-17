@@ -1,5 +1,38 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.23, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.24, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.24 - A Recommendation Shows Its Check (2026-11-18)
+
+**Before Claude recommends a fix, a follow-up issue, a test or a setting, it now checks that the problem is real and worth acting on, and says what it checked.** A review also looks for a running app on port 8888, and a review you asked to report only now ends by saying so. The rest corrects places where one of the toolkit's instruction files had not followed a change in another.
+
+### Added
+
+- **A recommendation carries the check behind it.** The rule that a claim is checked at its source before it is stated now covers recommendations too. Before proposing a fix, a follow-up issue, a test or a setting, Claude confirms that the problem is real and does harm, that it is still open and not already answered by what is on hand, and that the proposal would change the result, and it says what was checked. The rule is in three places: one sentence in the always-on rules file, a sixth shape under "Check at the source" in the toolkit reference, and one clause in `/tk:explore`, where most recommendations are made. It came from the correction log's ranking: the pattern it answers is a recommendation made before its premise was checked.
+- **Maintainer only: the release guide says when to record such a fix.** `docs/RELEASING.md` gains a step 7: when a release carries a fix that came from the correction log's ranking, record it once the release is out, because a ranking shows a before and after only for a fix that was recorded. The step also says how to tell that it applies: the release's changelog entries and the issues they close say so.
+- **Maintainer only: the wording test holds the review's port list to the browser helper's.** A new case fails when the ports `/tk:review` probes differ from the browser helper's own list. The test also lists the deep security audit's reworded sentence as that file's own.
+
+### Changed
+
+- **A review looks for a running app on port 8888 too.** `/tk:review` probed four local ports (3000, 3001, 5173 and 8080) before deciding whether to run its browser check, while the browser helper it hands over to looks on five. Both now use the same five, so an app already running on port 8888 is found.
+- **A review asked to report only says so in its last line.** Before, its report still ended by saying that fixes were being applied. It now ends: "Report only, as you asked: nothing was fixed on this run. The next run goes back to fixing automatically."
+- **The setup guide for agents points to the changelog for older releases.** `AGENT-SETUP.md` carried a clause for every release back to v6.0.0, 1,045 words in all. It now names this file, which has a section for each of those releases, and tells an agent upgrading from v5.x or earlier to read the v6.0.0 section first.
+
+### Fixed
+
+- **Instruction files that had not followed a change elsewhere.** A prompt audit read the toolkit's own instruction files against each other, and the corrections the owner accepted are in. In a full release review and in the deep security audit, the general helpers are now handed the severity scale they are told to use, and in the full release review they are told to edit no file. An exploration summary lists its open questions one per line, or says there are none, in place of leaving them for the plan stage, which the rule for moving on by itself never allowed; its option comparison page no longer needs a scope choice you were never offered. The agent that checks fixes is told which fixes reach it. The two debate commands and `/tk:peer-review` say to read both rule files they name. Ten statements of fact are corrected (which agents can run commands, which reviews send out helpers, how many judging agents there are, when each reviewer is used, where the report format lives, how a project's own fix rules are loaded, and a model example that broke its own word limit), and five out-of-date phrases are tidied.
+
+### Upgrading
+
+- The corrections, the toolkit reference's new part and the `/tk:explore` clause arrive with the plugin update, with no setup step and no new permission rows.
+- The rules file changed, so the next `/tk:upgrade` reports your `.claude/rules/toolkit.md` as behind the shipped copy (C-7, the check that compares the rules file with the shipped starter copy) and offers the merge; take it, or keep your wording. The new sentence about recommendations reaches your sessions only once you take it.
+
+### Why
+
+On 2026-11-16 the toolkit was read twice. A prompt audit compared its instruction files with each other and found places where one had not followed when another changed. A ranking of the correction log showed a gap in the rule about checking at the source: it named five cases, and a recommendation was not one of them. One cycle acts on both reads, so the files they share were edited and approved once.
+
+Maintainer only: the recommendation rule is a fix that came from the correction log's ranking, so step 7 of `docs/RELEASING.md` applies to this release.
+
+Maintainer only: this release ships under the catch-rate override. Reason: Claude Code updated itself from 2.1.325 to 2.1.326 between the v8.0.23 runs and these; both runs on this build caught all 9 planted bugs, one valid and one counted invalid for a single command the folder guard blocked; the owner waived the rerun on 2026-11-18.
 
 ## v8.0.23 - Lessons Become Checks (2026-11-15)
 

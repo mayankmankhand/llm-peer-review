@@ -131,6 +131,7 @@ A standing page rendered in a worktree has no predecessor on disk: copy the main
 A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.
 A standing page that closes findings by file cannot be shared between branches: a sibling branch's copy of the file never had the change.
 A start-of-run check does not cover a later call through a shared link: put the caller's version in the call.
+A step that applies only sometimes says where the reader looks to tell that it does.
 A step that builds from the working tree first checks that the tree is on the branch its output describes.
 A step that edits a file under `.claude/` rebuilds `plugin/` before its after run.
 A step that redoes an earlier scan must read that scan's snapshot, not the working tree.
@@ -320,6 +321,7 @@ Numbers quoted in release notes mid-cycle go stale; fill counts in the last veri
 On a pass the release gate prints one line per suite and no case names: confirm a passing case with a grep of the test file, not the gate's output.
 On the standing review page, name fixed findings by what changed, not by number.
 On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.
+Once every step saves a checkpoint, a final what-changed check compares against the start commit, never the tree.
 Once you read a held-out set's misses to fix against them, it is no longer held out: the first score is the measure.
 Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.
 Patch a workflow you will resume by appending work after its existing calls, never by inserting it.
@@ -462,6 +464,7 @@ When testing how an agent behaves, probe the typed agent that ships, not a stand
 When the owner changes a decision at a page, sweep what was already written under the old decision.
 When the plan's wording drifts from the exploration summary the owner approved, the summary wins.
 When two reads of a page disagree, check each against the page itself, not against the other read.
+When two reads of the same files finish in one session, offer one merged plan before drafting anything to file.
 When you keep records instead of replacing them, also keep everything those records point at.
 Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.
 Worktree detection: `--git-dir` vs `--git-common-dir`.
