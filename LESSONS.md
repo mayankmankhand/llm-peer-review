@@ -586,3 +586,12 @@
 - **When two reads of the same files finish in one session, offer one merged plan before drafting anything to file.**
 - **A step that applies only sometimes says where the reader looks to tell that it does.**
 - **Once every step saves a checkpoint, a final what-changed check compares against the start commit, never the tree.**
+
+## The spoken voice (the writing guide writes the way a person talks)
+
+- **When a prompt file gains a rule, reread its examples against it: a model copies the example before the rule.**
+- **A pass mark met with one miss still has a miss: read what caused it before closing the step.**
+- **A rule written from one case keeps that case's detail: reread it for a noun only that case had.**
+- **A pass mark is one only if the change it guards can move it; anything else is a rule for which runs count.**
+- **A helper run inside the project signs made-up messages with the owner's name: keep its output out of tracked files.**
+- **In a Claude Code shell `grep` is ugrep: a bound like `.{0,200}` fails as too complex; use `command grep` or a small bound.**

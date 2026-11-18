@@ -2,6 +2,32 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**The writing guide now has a spoken voice: Claude writes each sentence the way it would say it to the reader.** Asked to check a draft you wrote, it gives you notes and leaves the draft as it is. A request to a teammate thanks them, credits their work and asks what they think.
+
+### Added
+
+- **A spoken voice is the guide's default.** A new section, "Write the way you talk", covers every kind of writing the guide handles. It tells Claude to say the sentence first and write what it would say, to keep one idea to a breath, to start with who does what, and to use everyday words and contractions. Exact terms, numbers, names and quoted text stay exact, and Claude adds no slang, joke or filler to sound human. The guide's last pass over a draft is now a read-aloud pass.
+- **A draft you wrote stays yours.** Ask Claude to check something you wrote and it tells you what it would change and why. It leaves your words, your order and your length alone, and adds no list, deadline, request, subject line or greeting you didn't write. It rewrites the draft only when you ask for a rewrite.
+- **A request to a teammate is a request between peers.** The section for emails and chat messages now says what such a request carries: what it is for, credit for the work it builds on, a question about what they think as well as what you need, and please and thank you. Asking what they think is part of the same ask, and it goes in as a question, not as a list item. The section's example now says please and thanks too.
+- **Maintainer only: a test holds each part in place.** Three test cases pin the three parts above by their own wording, so one part can come out without touching the others. A fourth ties the line a project copies from `docs/EXTENDING.md` to the guide's real heading.
+
+### Changed
+
+- **Two of the guide's core rules say more.** Rule 3 adds "one word for one thing": once a thing has a name, keep that name to the end, because a second word sends the reader looking for a second thing. The sections for owner pages and specs no longer repeat it. Rule 4 adds: say what the reader will see or do, not the category it belongs to ("the Save button turns grey", not "the control changes state").
+- **The command guide describes the new voice.** The `/tk:writing` entry in `docs/COMMANDS.md` now covers the spoken voice, the kept draft and the request between peers, in three short paragraphs.
+- **Maintainer only: the guide's top part sits exactly on its 1,200-word cap.** The next addition there needs an equal cut. The section for messages counts 321 words of its 400.
+
+### Upgrading
+
+- The changed guide arrives with the plugin update, with no setup step and no new permission rows. The always-on rules file didn't change, so `/tk:upgrade` has nothing new to report for it.
+- What you'll notice is the voice of drafts: spoken, with contractions. Your project's own writing rules still win over the guide. If your project wants a formal voice, add one line to its `CLAUDE.md`: `docs/EXTENDING.md` has the line to copy, under "Your own writing rules".
+
+### Why
+
+Text that followed the guide could pass every check and still read as if a machine wrote it. Asked to check a short note, Claude handed back a rewritten one, and a request to a teammate often left out credit for their work or a question about what they think. The new wording was measured before it was kept, on ten made-up writing tasks, against four pass marks fixed before any run. Readers who didn't know which draft was which picked the new-guide draft as sounding more like a person in 26 of 30 pairs and as easier to read in 20 of 30. A check of a person's own note came back changed in 0 of 6 runs, against 6 of 6 with the old guide. A request to a teammate lacked thanks, credit or a real question in 0 of 6 runs on the final wording, against 4 of 6 with the old guide. Two faults this work expected to find, formal sentences a reader has to translate and a second word for the same thing, didn't show up in 20 drafts written with the old guide, so these notes don't claim the new rules fix them.
+
 ## v8.0.24 - A Recommendation Shows Its Check (2026-11-18)
 
 **Before Claude recommends a fix, a follow-up issue, a test or a setting, it now checks that the problem is real and worth acting on, and says what it checked.** A review also looks for a running app on port 8888, and a review you asked to report only now ends by saying so. The rest corrects places where one of the toolkit's instruction files had not followed a change in another.
