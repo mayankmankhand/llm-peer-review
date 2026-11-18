@@ -544,6 +544,14 @@ else {
   }
 }
 check('live: the writing guide stays short and dash-free', writingShortMisses.length === 0, writingShortMisses.join('; '));
+// The plain-speech cycle (2026-11), part 1 of 3. Each part is pinned in its own
+// block so one can be undone without the others. The phrases are literals,
+// never read from the files under test.
+{
+  const t = writingSkill || '';
+  const misses = ['A draft the person wrote stays theirs.', 'Add no list, deadline, request, subject line or greeting they did not write.'].filter(p => !t.includes(p));
+  check('live: the writing guide keeps a draft the person wrote as theirs', misses.length === 0, misses.map(p => 'SKILL.md lacks "' + p + '"').join('; '));
+}
 // A skill a command loads by name mid-run needs its two permission rows in the seed, or
 // default permission mode stops on the call (#206: html-viewing first shipped without them).
 const mdUnder = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? mdUnder(path.join(d, e.name)) : e.name.endsWith('.md') ? [path.join(d, e.name)] : []);

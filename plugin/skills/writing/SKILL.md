@@ -18,6 +18,7 @@ In this guide, "the owner" is the person you are working with in this session, a
 - When the project names its own guide or skill for a kind of writing, use that first, and this guide only where it is silent.
 - Quoted, dictated or locked text is never changed, not even for a dash: quotes from a source, the owner's own words, and anything the project marks as fixed.
 - Existing text changes only when the task is to edit it. A request for a summary is not permission to rewrite the source.
+- A draft the person wrote stays theirs. When they ask you to check it, tell them what you would change and why, and leave the draft as it is: their words, their order, their length. Add no list, deadline, request, subject line or greeting they did not write. Rewrite it only when they ask for a rewrite.
 
 ## Pick the kind, then read only its file
 
