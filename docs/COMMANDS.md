@@ -199,7 +199,11 @@ Full prompt: [`.claude/commands/create-issue.md`](../.claude/commands/create-iss
 
 ### `/writing` - the writing guide
 
-Claude opens the writing guide before it drafts something a person will read: a question, plan or summary for you, a PRD or spec, a README or docs, an issue, pull request or release note, an email or chat message, or web copy. It reads a short top part, then only the section for that kind of writing. The guide's default voice is a spoken one: Claude writes each sentence the way it would say it to the reader. Asked to check a draft you wrote, it gives you notes and leaves your wording, order and length alone. A request to a teammate thanks them, credits their work and asks what they think. Your project's own writing rules win over it; [Your own writing rules](EXTENDING.md#your-own-writing-rules) shows how to point Claude at a guide of your own, ask for a formal voice or switch a section off. You rarely need to type it: `/writing` on its own only loads the guide into the conversation, and Claude follows it for what you ask next.
+Claude opens the writing guide before it drafts something a person will read: a question, plan or summary for you, a PRD or spec, a README or docs, an issue, pull request or release note, an email or chat message, or web copy. It reads a short top part, then only the section for that kind of writing.
+
+The guide's default voice is a spoken one: Claude writes each sentence the way it would say it to the reader. Asked to check a draft you wrote, it gives you notes and leaves your wording, order and length alone. A request to a teammate thanks them, credits their work and asks what they think.
+
+Your project's own writing rules win over the guide; [Your own writing rules](EXTENDING.md#your-own-writing-rules) shows how to point Claude at a guide of your own, ask for a formal voice or switch a section off. You rarely need to type it: `/writing` on its own only loads the guide into the conversation, and Claude follows it for what you ask next.
 
 Full guide: [`.claude/skills/writing/SKILL.md`](../.claude/skills/writing/SKILL.md)
 
