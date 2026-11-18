@@ -9,9 +9,11 @@
 
 **Rules**
 - One ask per message. Two asks become two messages, or a numbered list.
+- A request to a teammate is a request between peers. Say what it is for, credit the work it builds on, ask what they think as well as for their files, and say please and thank you. Thanks and credit are not filler.
 - Fit one phone screen. Move detail to a link or an attachment.
 - Keep real politeness, and cut filler ("I hope this finds you well", "just circling back").
-- Do not make a sensitive message artificially blunt, and do not add urgency or familiarity the relationship does not have.
+- Match the warmth the relationship has: do not make a sensitive message artificially blunt, and do not add urgency or familiarity that is not there.
+- Write a message as plain text, the way people type one: no headings and no bold labels.
 - Name dates as dates ("Friday 31 October"), not "end of week".
 - A chat message (Slack, LinkedIn) is shorter than an email: no greeting paragraph and no signature block.
 

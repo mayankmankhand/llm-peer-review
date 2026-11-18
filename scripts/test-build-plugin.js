@@ -564,6 +564,13 @@ check('live: the writing guide stays short and dash-free', writingShortMisses.le
   if (kind('spec.md').includes('One thing, one name.')) misses.push('spec.md still carries its own one-name line');
   check('live: the writing guide makes a spoken voice the default', misses.length === 0, misses.join('; '));
 }
+
+// The plain-speech cycle, part 3 of 3: a request to a teammate.
+{
+  const m = exists(live, 'skills/writing/messages.md') ? read(live, 'skills/writing/messages.md') : '';
+  const misses = ['A request to a teammate is a request between peers.', 'Thanks and credit are not filler.', 'Match the warmth the relationship has', 'no headings and no bold labels'].filter(p => !m.includes(p));
+  check('live: the writing guide treats a request to a teammate as a request between peers', misses.length === 0, misses.map(p => 'messages.md lacks "' + p + '"').join('; '));
+}
 // A skill a command loads by name mid-run needs its two permission rows in the seed, or
 // default permission mode stops on the call (#206: html-viewing first shipped without them).
 const mdUnder = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? mdUnder(path.join(d, e.name)) : e.name.endsWith('.md') ? [path.join(d, e.name)] : []);
