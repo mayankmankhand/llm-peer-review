@@ -9,7 +9,7 @@
 
 **Rules**
 - One ask per message. Two asks become two messages, or a numbered list.
-- A request to a teammate is a request between peers. Say what it is for, credit the work it builds on, ask what they think as well as for their files, and say please and thank you. Thanks and credit are not filler.
+- A request to a teammate is a request between peers. Say what it is for, credit the work it builds on, ask what they think as well as for what you need, and say please and thank you. Asking what they think is part of the same ask: put it as a question, not as a list item. Thanks and credit are not filler.
 - Fit one phone screen. Move detail to a link or an attachment.
 - Keep real politeness, and cut filler ("I hope this finds you well", "just circling back").
 - Match the warmth the relationship has: do not make a sensitive message artificially blunt, and do not add urgency or familiarity that is not there.
@@ -19,4 +19,4 @@
 
 **Example.** The release is made up; the ask in the first line is the rule.
 - Before: "Hi team, I wanted to give everyone a quick update on where things stand with the release, as there have been a few developments this week."
-- After: "The 1.2 release moves to Friday because one test fails on Windows. Can someone with a Windows machine run the tests today and post the result here?"
+- After: "The 1.2 release moves to Friday because one test fails on Windows. Can someone with a Windows machine please run the tests today and post the result here? Thanks."
