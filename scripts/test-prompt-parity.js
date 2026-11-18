@@ -791,6 +791,15 @@ console.log('\n8. the writing rules (#276, #280)');
   check('276: the In plain words heading and its five labels sit in hitl-stages.md, explore.md and create-plan.md', plainMisses.length === 0, plainMisses.join('; '));
 }
 
+// The plain-speech cycle (2026-11): the line a project copies to ask for a formal
+// voice names the guide's section by its heading, so the two cannot drift apart.
+{
+  const named = /\*\*Ask for a formal voice:\*\* `[^`\n]*"([^"\n]+)" section does not apply here\.`/.exec(read('docs/EXTENDING.md'));
+  const headings = read('.claude/skills/writing/SKILL.md').split(/\r?\n/);
+  check('the formal-voice line in the extending guide names a section the writing guide has', !!named && headings.includes('## ' + named[1]),
+    named ? 'SKILL.md has no "## ' + named[1] + '" heading' : 'docs/EXTENDING.md has no formal-voice line');
+}
+
 // #281: the lessons rules the owner approved stay in /document, and the trim
 // guide keeps its nine steps in order under its heading, so a rewrite that drops
 // one fails here (review of #281, R6).

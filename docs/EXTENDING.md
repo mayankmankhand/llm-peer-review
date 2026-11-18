@@ -101,10 +101,11 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 The plugin ships a writing guide (`/tk:writing`) that Claude opens before it drafts something a person will read. Your project's own writing rules win over it, so keep them where they already are, usually `CLAUDE.md`, which Claude reads on every turn. Nothing needs to move.
 
-Two one-line patterns cover most needs. Put either in `CLAUDE.md`:
+Three one-line patterns cover most needs. Put any of them in `CLAUDE.md`:
 
 - **Point Claude at your own guide for a kind of writing:** `For web copy, use our skill brand-voice.` Claude then uses your skill first, and the toolkit's guide only where yours is silent.
 - **Switch a section off:** `Skip the toolkit's web copy section; follow docs/voice.md instead.`
+- **Ask for a formal voice:** `Write formal prose in this project, with no contractions; the toolkit guide's "Write the way you talk" section does not apply here.`
 
 The switch is an instruction Claude follows, not a hard off switch: Claude Code cannot turn off one skill of a plugin, so the guide stays installed and your line decides how it is used.
 
