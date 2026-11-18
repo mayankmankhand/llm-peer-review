@@ -552,6 +552,18 @@ check('live: the writing guide stays short and dash-free', writingShortMisses.le
   const misses = ['A draft the person wrote stays theirs.', 'Add no list, deadline, request, subject line or greeting they did not write.'].filter(p => !t.includes(p));
   check('live: the writing guide keeps a draft the person wrote as theirs', misses.length === 0, misses.map(p => 'SKILL.md lacks "' + p + '"').join('; '));
 }
+
+// The plain-speech cycle, part 2 of 3: the spoken voice, and "one name" said once, in the top part.
+{
+  const t = writingSkill || '';
+  const kind = (f) => (exists(live, 'skills/writing/' + f) ? read(live, 'skills/writing/' + f) : '');
+  const misses = ['## Write the way you talk', 'Write every sentence the way you would say it out loud to this reader.', '**Say it first.**', '**One breath, one idea.**',
+    '**Someone does something.**', '**Everyday words, and contractions.**', '**Plain, not performed.**', 'one word for one thing', 'not the category it belongs to',
+    '## One read-aloud pass, then stop'].filter(p => !t.includes(p)).map(p => 'SKILL.md lacks "' + p + '"');
+  if (kind('owner-pages.md').includes('Give each thing one name and keep it for the whole page.')) misses.push('owner-pages.md still carries its own one-name line');
+  if (kind('spec.md').includes('One thing, one name.')) misses.push('spec.md still carries its own one-name line');
+  check('live: the writing guide makes a spoken voice the default', misses.length === 0, misses.join('; '));
+}
 // A skill a command loads by name mid-run needs its two permission rows in the seed, or
 // default permission mode stops on the call (#206: html-viewing first shipped without them).
 const mdUnder = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? mdUnder(path.join(d, e.name)) : e.name.endsWith('.md') ? [path.join(d, e.name)] : []);

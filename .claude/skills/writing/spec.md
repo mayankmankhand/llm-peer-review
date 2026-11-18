@@ -13,7 +13,7 @@
 
 **Rules**
 - Link the PRD for the why instead of retelling it.
-- Use exact names for files, fields, commands and functions, spelled as in the code. One thing, one name.
+- Use exact names for files, fields, commands and functions, spelled as in the code.
 - Here the exact term is right: explain one the first time only when a newcomer to the codebase would not know it.
 - Give each decision its reason and the rejected option, so nobody reopens it.
 - Give every step a check someone can run: a test, a command or a visible result.

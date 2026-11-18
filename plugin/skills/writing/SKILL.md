@@ -35,12 +35,22 @@ Name the kind of writing first. Then read its file, and only that one:
 
 When a piece mixes kinds, read the file for its main reader. Resumes, spoken scripts and chatbot personas have no file here: follow the project's own rules for them, and the core rules below.
 
+## Write the way you talk
+
+Write every sentence the way you would say it out loud to this reader. That is the default for every kind of writing here.
+
+- **Say it first.** If you would not say the sentence to this reader in those words, write what you would say: "Tell me by Friday if that's a problem", not "Please advise of any concerns by Friday".
+- **One breath, one idea.** A sentence you could not say in one breath becomes two. Do not stack numbers, nouns or brackets in one sentence.
+- **Someone does something.** Start with who or what acts, then a plain verb: "we moved the launch", not "the launch date has been adjusted".
+- **Everyday words, and contractions.** "Use", "about", "so", "before", "help"; "it's", "don't", "we'll".
+- **Plain, not performed.** Exact terms, numbers, units, names and quoted text stay exact. Never add slang, a folksy phrase, a joke or filler ("just", "basically", "honestly") to sound human.
+
 ## The core rules
 
 1. **Know the reader and the one takeaway first.** Before drafting, settle who will read this, what they already know, and the one thing they should know or do when they finish. If you cannot say that in one sentence, ask before you write.
 2. **Point first.** Lead with the answer, the request, the decision or the update. Background comes after it, and only as much as the reader needs to act.
-3. **Use the reader's words.** Replace a term the reader may not know with everyday words, or explain it the first time it appears when the exact term matters (in a spec, for an engineer). For the owner, the toolkit's own parts have fixed everyday names (Rule 8 of the always-on rules file), and the exact term goes in the proof at the end.
-4. **Be specific.** Name the thing, the number, the date, the person. A word that claims importance (critical, key, significant) needs its reason beside it, or it goes.
+3. **Use the reader's words, and one word for one thing.** Replace a term the reader may not know with everyday words, or explain it the first time it appears when the exact term matters (in a spec, for an engineer). Once a thing has a name, keep that name to the end, the reader's own when they have one: repeating a word is fine, and a second word sends the reader looking for a second thing. For the owner, the toolkit's own parts have fixed everyday names (Rule 8 of the always-on rules file), and the exact term goes in the proof at the end.
+4. **Be specific.** Name the thing, the number, the date, the person. Say what the reader will see or do, not the category it belongs to: "the Save button turns grey", not "the control changes state". A word that claims importance (critical, key, significant) needs its reason beside it, or it goes.
 5. **Invent nothing.** Never add a fact, number, quote, cause, customer or experience the source does not have. Mark the gap and ask, for example "[need: the date the export shipped]". A plain true sentence beats a vivid false one.
 6. **Hedge only what you cannot back.** Keep honest uncertainty ("may", "in 2 of 3 runs"). Cut a hedge that hides a claim you can support, and never make a claim stronger than its evidence.
 7. **Cut what does no work, then stop.** Each sentence adds a fact, a reason, a step or a decision. No warm-up, no recap of what you just said, no send-off. End on the last useful thought.
@@ -50,10 +60,10 @@ When a piece mixes kinds, read the file for its main reader. Resumes, spoken scr
 
 No em dashes or en dashes, and no spaced hyphen standing in for one: rewrite the sentence with a comma, a colon, a full stop, or two sentences. Hyphens stay inside words (check-first) and in fixed line formats that ask for them. Quoted, dictated or locked text is never changed, even for a dash.
 
-## One review pass, then stop
+## One read-aloud pass, then stop
 
-Read the draft once as its reader would: a stranger for a README or a web page, a busy person for a message, the owner for a summary. Fix the weakest real problem you find, then stop. Polishing again and again makes text vaguer, not clearer.
+Read the draft once as its reader would, hearing each sentence: a stranger for a README or a web page, a busy person for a message, the owner for a summary. Say again any sentence you would not say to them that way, fix the weakest real problem you find, then stop. Polishing again and again makes text vaguer, not clearer.
 
 ## Credit
 
-The core rules are adapted, in this toolkit's own words, from the clarity writing guide by Addy Osmani (github.com/addyosmani/clarity, MIT license).
+Much of this guide is adapted, in this toolkit's own words, from the clarity writing guide by Addy Osmani (github.com/addyosmani/clarity, MIT license).

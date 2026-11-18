@@ -12,7 +12,6 @@
 - The cost names money and time when either is spent, and says so when nothing is.
 - "What changes for you" says what the owner will see, do or be asked.
 - A review summary line keeps its shape: number, verdict, plain words, proof. The plain words say what changed for the reader, not which file moved.
-- Give each thing one name and keep it for the whole page.
 - No line in the block starts with a label a script reads, such as `**Models:**`, `**Mode:**` or `**Scope dial:**`.
 
 **Example.** The before text is real, from an exploration summary in this toolkit; the topic is specific to it, and the shape is the rule.
