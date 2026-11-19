@@ -319,7 +319,6 @@
 - **A "nothing reads this file" claim must check every grep hit, test suites included.**
 - **After moving text between files, sweep for "above", "below" and quoted heading names before calling it done.**
 - **When the owner changes a decision at a page, sweep what was already written under the old decision.**
-- **To republish a standing page from a new session, read the live page once, then publish the rendered file.**
 
 ## Issues 219 and 220 (the standing page and the interrupt)
 
@@ -407,7 +406,6 @@
 
 - **A runner mode several callers share changes only behind a flag the new caller passes.**
 - **Verification runs of a recording feature land in the real record: remove their rows, or the next report shows the demo.**
-- **On the standing review page, name fixed findings by what changed, not by number.**
 
 ## Issue 249 (the test gate speed)
 
