@@ -595,3 +595,7 @@
 - **A pass mark is one only if the change it guards can move it; anything else is a rule for which runs count.**
 - **A helper run inside the project signs made-up messages with the owner's name: keep its output out of tracked files.**
 - **In a Claude Code shell `grep` is ugrep: a bound like `.{0,200}` fails as too complex; use `command grep` or a small bound.**
+
+## The three-gaps cycle (page numbers, the page read, the corrections hand-off)
+
+- **A borrowed pattern brings its misses along: test it on the input the new use cannot afford to lose.**
