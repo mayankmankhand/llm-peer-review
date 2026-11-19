@@ -1878,6 +1878,37 @@ function openFindingsWithLabels(data) {
   return out;
 }
 
+// The highest R<n> a payload holds, in any string at any depth: a finding's id,
+// and every number the run's own text names. A split note that says "seeded as
+// R12", or a line of the fixed list, can name a finding that has since left the
+// payload, and a carried finding given that number makes the text point at it.
+// That happened in four reviews, the last on 2026-11-18, so a number the run
+// wrote counts as taken, the same as an id it used. Reading too much only
+// leaves a gap in the carried numbers; reading too little puts a finding under
+// a number that means something else.
+//   - Tags are dropped first, as proseWords() does, so an image's address or
+//     its embedded bytes are never read as text the page prints.
+//   - A number is a capital R at the start of a word, one to four digits, then
+//     the end of the word: PR223, r40, R12a and R12345 are not finding numbers.
+function highestNamedId(value) {
+  let max = 0;
+  (function walk(v) {
+    if (typeof v === 'string') {
+      const text = v.replace(/<[^>]*>/g, ' ');
+      const re = /\bR(\d{1,4})\b/g;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        if (Number(m[1]) > max) max = Number(m[1]);
+      }
+    } else if (Array.isArray(v)) {
+      v.forEach(walk);
+    } else if (v && typeof v === 'object') {
+      Object.keys(v).forEach(function (k) { walk(v[k]); });
+    }
+  })(value);
+  return max;
+}
+
 // Merge by lens (issue #162, R18). The standing page is the repository's open
 // findings, and a direct single-lens run (/review-code) sees only its own
 // lens. Replacing the page with that would report every other lens's open
@@ -1964,11 +1995,9 @@ function carryForward(data, prior, plan) {
   // "fix R1" would point at two things. Carried findings continue the sequence
   // after this run's last number (review of the #162 cycle, R9). The key, not
   // the id, is a finding's identity across runs, so renumbering loses nothing.
-  let maxId = 0;
-  openFindings(data).concat(auditedFindings(data)).forEach(function (f) {
-    const m = /^R(\d+)$/.exec(String(f.id || ''));
-    if (m && Number(m[1]) > maxId) maxId = Number(m[1]);
-  });
+  // "Last number" is the highest one anywhere in the payload, not only among
+  // its ids: highestNamedId() says why.
+  const maxId = highestNamedId(data);
   carried.forEach(function (f, i) { f.id = 'R' + (maxId + 1 + i); });
 
   if (Array.isArray(data.groups)) data.groups.push({ label: '', findings: carried });

@@ -1835,6 +1835,65 @@ function cycle162ReviewTests() {
     new Set(cbFinds.map(function (f) { return f.id; })).size === cbFinds.length,
     cbFinds.map(function (f) { return f.id + (f.carried ? '(carried)' : ''); }).join(' '));
 
+  // --- Named numbers: a carried finding never takes a number this run's payload names ---
+  // Four reviews, the last on 2026-11-18, published or nearly published a page
+  // whose text pointed at the wrong finding: a split note ending "(seeded as
+  // R12)", or a line of the fixed list, named a finding that had since left
+  // the payload, the carried findings were numbered from the highest id still
+  // in it, and one of them landed on the named number. Each case below renders
+  // a first page with one finding from another lens, then a second page from
+  // the code lens alone, and reads the number the carried finding was given.
+  const carriedIdOf = function (name, second) {
+    run(name, { title: 'T', groups: [{ label: 'ux', findings: [finding('R1', { specialist: 'ux', file: { relPath: 'b.css' } })] }] });
+    const c = finds(island(run(name, Object.assign({ title: 'T', lenses: ['code'] }, second)).html))
+      .filter(function (f) { return f.carried; });
+    return c.length === 1 ? c[0].id : 'carried ' + c.length;
+  };
+  const ownFinding = function (extra) {
+    return finding('R1', Object.assign({ specialist: 'code', file: { relPath: 'a.js' } }, extra || {}));
+  };
+  const ownGroup = function (extra) { return [{ label: 'code', findings: [ownFinding(extra)] }]; };
+
+  const afterSplit = carriedIdOf('named-split', { groups: ownGroup().concat([{ label: 'Audited out', findings: [
+    finding('R2', { specialist: 'code', fields: [
+      { label: 'Double-check verdict', value: 'REFUTED' },
+      { label: 'Split note', value: 'a narrower claim holds (seeded as R3)' }] })] }]) });
+  check('named numbers: a carried finding never takes the number a split note names',
+    afterSplit === 'R4', 'the carried finding is ' + afterSplit + '; the note names R3, so R4 is the first free number');
+
+  // One render per slot, the slot alone naming R7: a slot the walk skipped
+  // would leave its carried finding at R2, and the detail names that slot.
+  const slots = {
+    bottomLine: { bottomLine: ['R7 was the one that mattered.'], groups: ownGroup() },
+    disposition: { disposition: '1 raised, R7 fixed.', groups: ownGroup() },
+    alreadyFixed: { alreadyFixed: ['R7: the stale link was fixed.'], groups: ownGroup() },
+    couldNotCheck: { couldNotCheck: ['R7 could not be checked again.'], groups: ownGroup() },
+    looksGood: { looksGood: ['The fix for R7 reads well.'], groups: ownGroup() },
+    topIssues: { topIssues: { block: [], warn: ['R7 (a.js:1 - a thing)'], suggest: [] }, groups: ownGroup() },
+    subtitle: { subtitle: 'Covers R7.', groups: ownGroup() },
+    summary: { summary: [{ label: 'Fixed', value: 'R7' }], groups: ownGroup() },
+    what: { groups: ownGroup({ what: 'Should fix. This breaks what R7 fixed.' }) },
+    context: { groups: ownGroup({ context: 'It fires where R7 did.' }) },
+    fix: { groups: ownGroup({ fix: 'One line, the same as R7.' }) },
+    fields: { groups: ownGroup({ fields: [{ label: 'Proof', value: 'the check for R7 printed 0' }] }) }
+  };
+  const missed = Object.keys(slots).map(function (slot) {
+    const id = carriedIdOf('named-' + slot.toLowerCase(), slots[slot]);
+    return id === 'R8' ? '' : slot + ' gave ' + id;
+  }).filter(Boolean);
+  check('named numbers: every text slot of the payload counts',
+    missed.length === 0, missed.join(', '));
+
+  // What does not count: a number inside a tag (an image address is not text
+  // the page prints), a run of more than four digits, a letter before the R,
+  // and a lowercase r. Beside them the same payload names R7 in plain text, so
+  // a walk that reads nothing fails here too, not only one that reads too much.
+  const afterNoise = carriedIdOf('named-noise', {
+    bottomLine: ['R7 is the one to read.', 'Also PR223, r40 and R12345 came up.'],
+    groups: ownGroup({ fields: [{ label: 'Screenshot', value: '<img src="shots/R99.png" alt="R98">' }] }) });
+  check('named numbers: text inside a tag and a long digit run do not count',
+    afterNoise === 'R8', 'the carried finding is ' + afterNoise + '; R8 means only the plain R7 was read');
+
   // --- R13: an exit line glued to output that ended without a newline ---
   const glued = path.join(rdir, 'glued.txt');
   fs.writeFileSync(glued, 'xexit 3\n', 'utf-8');

@@ -157,7 +157,9 @@
     // Base-rate lists, rendered after the findings. Each item is a string
     // (inline HTML allowed). Both are quiet by design: they exist to make the
     // short list of open findings believable. Omit or empty to skip either.
-    "alreadyFixed":  [ "R4: the stale link, past tense, with the check that confirmed it." ],
+    // Name a fixed finding by what changed, never by its number: the page
+    // renumbers the findings it carries forward.
+    "alreadyFixed":  [ "The stale link, past tense, with the check that confirmed it." ],
     "couldNotCheck": [ "The browser lens: no dev server was running." ],
 
     // Footer count strip. Each span = optional emoji + bold label + value.
