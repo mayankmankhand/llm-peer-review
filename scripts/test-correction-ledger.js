@@ -1089,6 +1089,196 @@ function outsideRoots(dir, roots) {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- the candidates hand-off file: --out saves it, --discard removes it --------
+// The record step used to print the candidates into the conversation and have
+// the session pass them on to the reader, which meant retyping about 9 KB of
+// JSON; on 2026-11-18 one candidate gained a clause on the way. With --out the
+// script saves the list itself, in the one place it may live (a file named
+// correction-candidates.json, in a folder of its own inside the temp directory
+// and outside the project), and prints only counts; --discard removes that file
+// once the reader has read it. Before these options existed the script answered
+// `--out` with exit 1, "unknown argument" and nothing printed, so a case that
+// only checked for a refusal would have passed without them: each refusal below
+// also reads the script's own reason.
+{
+  const NAME = 'correction-candidates.json';
+  const sb = makeSandbox('candfile');
+  seedTranscripts(sb);
+  const folder = function (label) {
+    const d = path.join(sb.root, label);
+    fs.mkdirSync(d, { recursive: true });
+    return d;
+  };
+  const parsed = function (text) { try { return JSON.parse(text); } catch (e) { return null; } };
+  const fileJson = function (f) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch (e) { return null; } };
+  const said = function (r) { return 'exit ' + r.status + ' ' + JSON.stringify((r.stderr || r.stdout).trim().slice(0, 160)); };
+
+  // The plain form, for comparison: the same list, printed.
+  const plain = parsed(runRaw(sb, ['--candidates']).stdout) || { candidates: [] };
+
+  const file1 = path.join(folder('out-1'), NAME);
+  const saved = runRaw(sb, ['--candidates', '--out', file1]);
+  const printed = parsed(saved.stdout) || {};
+  const onDisk = fileJson(file1);
+  let ownerOnly = false;
+  try { ownerOnly = process.platform === 'win32' || (fs.statSync(file1).mode & 0o077) === 0; } catch (e) { ownerOnly = false; }
+  let samePath = false;
+  try { samePath = fs.realpathSync(String(printed.savedTo)) === fs.realpathSync(file1); } catch (e) { samePath = false; }
+  check('hand-off: the candidates go to the file and their text stays off the screen',
+    saved.status === 0 && plain.candidates.length > 0 &&
+    printed.candidates === undefined && printed.candidateCount === plain.candidates.length &&
+    printed.scanned === true && samePath &&
+    saved.stdout.indexOf('gitignore does nothing') === -1 &&
+    onDisk !== null && JSON.stringify(onDisk.candidates) === JSON.stringify(plain.candidates) &&
+    JSON.stringify(onDisk).indexOf('gitignore does nothing') !== -1 && ownerOnly,
+    said(saved));
+
+  // A refusal exits 1, prints nothing, leaves no file, and says which rule refused it.
+  const refusal = function (file, reason, env) {
+    const r = runRaw(sb, ['--candidates', '--out', file], { env: env || {} });
+    return r.status === 1 && r.stdout === '' && reason.test(r.stderr) && !fs.existsSync(file) ? '' : said(r);
+  };
+  // Outside the temp directory: the repo's ignored artifacts folder, or /var/tmp
+  // when the checkout itself sits under /tmp, the same two the block above uses.
+  const tempRoots = [os.tmpdir(), '/tmp'];
+  const repoRoot = path.resolve(__dirname, '..');
+  const outsideParents = [
+    { usable: function () { return outsideRoots(repoRoot, tempRoots); }, parent: path.join(repoRoot, 'artifacts', 'html') },
+    { usable: function () { return outsideRoots('/var/tmp', tempRoots); }, parent: '/var/tmp' }
+  ];
+  let outsideDir = null;
+  for (let i = 0; i < outsideParents.length && outsideDir === null; i++) {
+    if (!outsideParents[i].usable()) continue;
+    try {
+      fs.mkdirSync(outsideParents[i].parent, { recursive: true });
+      outsideDir = fs.mkdtempSync(path.join(outsideParents[i].parent, 'ledger-candfile-'));
+    } catch (e) { outsideDir = null; }
+  }
+  const why = [];
+  let bare = 'not run';
+  let oneDown = { status: null, stdout: '', stderr: 'not run' };
+  let oneDownFile = '';
+  try {
+    if (outsideDir === null) why.push('no writable folder outside ' + tempRoots.join(' and ') + ': tried the repo and /var/tmp');
+    else {
+      const m = refusal(path.join(outsideDir, NAME), /outside the temp directory/);
+      if (m) why.push('outside the temp folder: ' + m);
+      // With the system temp folder pointed at that same folder: a file directly
+      // in it has no folder of its own, so every session on the machine would
+      // share it, and it is refused; one folder down is saved.
+      const asTemp = { TMPDIR: outsideDir, TMP: outsideDir, TEMP: outsideDir };
+      bare = refusal(path.join(outsideDir, NAME), /outside the temp directory/, asTemp);
+      oneDownFile = path.join(outsideDir, 'own', NAME);
+      fs.mkdirSync(path.dirname(oneDownFile));
+      oneDown = runRaw(sb, ['--candidates', '--out', oneDownFile], { env: asTemp });
+    }
+    let m = refusal(path.join(sb.proj, NAME), /inside the project/);
+    if (m) why.push('inside the project: ' + m);
+    m = refusal(path.join(folder('out-2'), 'candidates.json'), /must be named correction-candidates\.json/);
+    if (m) why.push('another name: ' + m);
+    check('hand-off: a path outside the temp folder, inside the project or under another name is refused',
+      why.length === 0, why.join(' | '));
+    check('hand-off: a file with no folder of its own in the temp folder is refused, and one folder down is saved',
+      bare === '' && oneDown.status === 0 && fs.existsSync(oneDownFile), 'bare: ' + (bare || 'refused') + ' | one down: ' + said(oneDown));
+  } finally {
+    if (outsideDir !== null) fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
+
+  const file3 = path.join(folder('out-3'), NAME);
+  const first = runRaw(sb, ['--candidates', '--out', file3]);
+  const bytes = fs.existsSync(file3) ? fs.readFileSync(file3, 'utf-8') : null;
+  const again = runRaw(sb, ['--candidates', '--out', file3]);
+  check('hand-off: an existing file is never overwritten',
+    first.status === 0 && bytes !== null && again.status === 1 && again.stdout === '' &&
+    /already exists/.test(again.stderr) && fs.readFileSync(file3, 'utf-8') === bytes,
+    'first exit ' + first.status + ', second ' + said(again));
+
+  const file4 = path.join(folder('out-4'), NAME);
+  const wrongMode = runRaw(sb, ['--heartbeat', '--out', file4]);
+  check('hand-off: the save option is refused with any other mode',
+    wrongMode.status === 1 && wrongMode.stdout === '' &&
+    /--candidates or --backfill-candidates/.test(wrongMode.stderr) &&
+    !fs.existsSync(file4) && !fs.existsSync(path.join(sb.home, '.claude', 'correction-heartbeat.jsonl')),
+    said(wrongMode));
+
+  // Nothing kept by the filter: a count of 0 and no file, so there is nothing to hand over or remove.
+  const sbEmpty = makeSandbox('candempty');
+  const emptyTranscripts = path.join(sbEmpty.home, '.claude', 'projects', sbEmpty.proj.replace(/[/\\]/g, '-'));
+  fs.mkdirSync(emptyTranscripts, { recursive: true });
+  fs.writeFileSync(path.join(emptyTranscripts, 'sess-1.jsonl'), [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Here is the plan.' }] } }),
+    JSON.stringify({ type: 'user', timestamp: '2026-08-31T10:01:00.000Z', sessionId: 'sess-1', message: { content: 'go' } })
+  ].join('\n') + '\n', 'utf-8');
+  const emptyOut = path.join(sbEmpty.root, 'out');
+  fs.mkdirSync(emptyOut, { recursive: true });
+  const fileE = path.join(emptyOut, NAME);
+  const none = runRaw(sbEmpty, ['--candidates', '--out', fileE]);
+  const nonePrinted = parsed(none.stdout) || {};
+  check('hand-off: an empty list saves no file and prints a count of 0',
+    none.status === 0 && nonePrinted.scanned === true && nonePrinted.candidateCount === 0 &&
+    nonePrinted.savedTo === undefined && nonePrinted.candidates === undefined && !fs.existsSync(fileE),
+    said(none));
+  fs.rmSync(sbEmpty.root, { recursive: true, force: true });
+
+  // The documented folder comes from `mktemp -d /tmp/...`, so /tmp has to be
+  // accepted wherever the system temp folder points. Not run where /tmp is not a folder.
+  let tmpIsFolder = false;
+  try { tmpIsFolder = fs.statSync('/tmp').isDirectory(); } catch (e) { tmpIsFolder = false; }
+  if (tmpIsFolder) {
+    const elsewhere = folder('child-tmp');
+    const tempEnv = { TMPDIR: elsewhere, TMP: elsewhere, TEMP: elsewhere };
+    let underTmp = null;
+    try { underTmp = fs.mkdtempSync('/tmp/ledger-candtmp-'); } catch (e) { underTmp = null; }
+    try {
+      const fileT = underTmp === null ? '' : path.join(underTmp, NAME);
+      const viaTmp = underTmp === null ? { status: null, stdout: '', stderr: 'could not make a folder under /tmp' }
+        : runRaw(sb, ['--candidates', '--out', fileT], { env: tempEnv });
+      check('hand-off: a folder under /tmp is accepted whatever the system temp folder is',
+        viaTmp.status === 0 && fs.existsSync(fileT), said(viaTmp));
+    } finally {
+      if (underTmp !== null) fs.rmSync(underTmp, { recursive: true, force: true });
+    }
+  }
+
+  // Links: the folder is judged where it really is, and the write never follows
+  // a link left at the file's own path. Not run where links cannot be made.
+  const linkedFolder = path.join(sb.root, 'out-link');
+  const danglingFile = path.join(folder('out-link2'), NAME);
+  const stolen = path.join(sb.proj, 'stolen.json');
+  let linksMade = false;
+  try { fs.symlinkSync(sb.proj, linkedFolder, 'dir'); fs.symlinkSync(stolen, danglingFile); linksMade = true; } catch (e) { linksMade = false; }
+  if (linksMade) {
+    const viaFolderLink = runRaw(sb, ['--candidates', '--out', path.join(linkedFolder, NAME)]);
+    const viaFileLink = runRaw(sb, ['--candidates', '--out', danglingFile]);
+    check('hand-off: a link cannot carry the file into the project or through to another file',
+      viaFolderLink.status === 1 && /inside the project/.test(viaFolderLink.stderr) && !fs.existsSync(path.join(sb.proj, NAME)) &&
+      viaFileLink.status === 1 && /already exists/.test(viaFileLink.stderr) && !fs.existsSync(stolen),
+      'folder link: ' + said(viaFolderLink) + ' | file link: ' + said(viaFileLink));
+  }
+
+  const file7 = path.join(folder('out-7'), NAME);
+  runRaw(sb, ['--candidates', '--out', file7]);
+  const gone = runRaw(sb, ['--discard', file7]);
+  const goneAgain = runRaw(sb, ['--discard', file7]);
+  const pkg = path.join(sb.proj, 'package.json');
+  fs.writeFileSync(pkg, '{}\n', 'utf-8');
+  const notOurs = runRaw(sb, ['--discard', pkg]);
+  const other = path.join(folder('out-7b'), 'data.json');
+  fs.writeFileSync(other, '{}\n', 'utf-8');
+  const otherName = runRaw(sb, ['--discard', other]);
+  const inProject = path.join(sb.proj, NAME);
+  fs.writeFileSync(inProject, '{}\n', 'utf-8');
+  const projectCopy = runRaw(sb, ['--discard', inProject]);
+  check('hand-off: discard removes the saved file and nothing else',
+    gone.status === 0 && (parsed(gone.stdout) || {}).discarded === true && !fs.existsSync(file7) &&
+    goneAgain.status === 0 && (parsed(goneAgain.stdout) || {}).discarded === false &&
+    notOurs.status === 1 && /must be named/.test(notOurs.stderr) && fs.existsSync(pkg) &&
+    otherName.status === 1 && /must be named/.test(otherName.stderr) && fs.existsSync(other) &&
+    projectCopy.status === 1 && /inside the project/.test(projectCopy.stderr) && fs.existsSync(inProject),
+    [gone, goneAgain, notOurs, otherName, projectCopy].map(said).join(' | '));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- the main copy's opt-out is honored from a worktree, on any git -----------
 // The marker is untracked and /worktree does not copy it, so from a worktree the
 // script has to find the MAIN copy, via `git rev-parse --git-common-dir`. The
@@ -1670,6 +1860,21 @@ function outsideRoots(dir, roots) {
     check('backfill counts each row it could not use, by reason',
       JSON.stringify(c.counts) === JSON.stringify({ repo_rows: 6, not_needed: 1, already_filled: 0, no_session: 2, transcript_gone: 1, no_match: 1, candidates: 1 }),
       JSON.stringify(c.counts));
+    // The same list through --out: saved whole to the hand-off file, with only
+    // its counts printed, so the exchange never reaches the conversation.
+    const bfOut = path.join(sb.root, 'bf-out', 'correction-candidates.json');
+    fs.mkdirSync(path.dirname(bfOut), { recursive: true });
+    const viaFile = runRaw(sb, ['--backfill-candidates', '--out', bfOut], { cwd: bf });
+    let viaPrinted = {};
+    try { viaPrinted = JSON.parse(viaFile.stdout); } catch (e) { viaPrinted = {}; }
+    let viaSaved = null;
+    try { viaSaved = JSON.parse(fs.readFileSync(bfOut, 'utf-8')); } catch (e) { viaSaved = null; }
+    check('hand-off: the fill-in list goes to the file and only its counts are printed',
+      viaFile.status === 0 && viaPrinted.candidates === undefined && viaPrinted.candidateCount === 1 &&
+      JSON.stringify(viaPrinted.counts) === JSON.stringify(c.counts) && typeof viaPrinted.savedTo === 'string' &&
+      viaFile.stdout.indexOf('Install with one command') === -1 &&
+      viaSaved !== null && JSON.stringify(viaSaved.candidates) === JSON.stringify(c.candidates),
+      'exit ' + viaFile.status + ' ' + JSON.stringify((viaFile.stderr || viaFile.stdout).trim().slice(0, 160)));
     const fill = function (entries) { return runRaw(sb, ['--add-backfill', '--data', writeRows(sb, entries)], { cwd: bf }); };
     const good = { at: '2026-09-22T10:01:00.000Z', session: 'sess-b1', trigger: 'asked for a CLI release note', rewrite: 'Install with one command, then run it.' };
     let r = fill([{ at: '2026-09-22T15:00:00.000Z', session: 'sess-x', trigger: 'x', rewrite: '' }]);

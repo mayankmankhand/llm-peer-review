@@ -142,9 +142,11 @@ const argv = process.argv.slice(2);
 const opts = {
   candidates: false, add: false, heartbeat: false,
   rollup: false, showRollup: false, setAxial: false, evidence: false, recordFix: false,
-  backfillCandidates: false, addBackfill: false, cycleTime: false,
+  backfillCandidates: false, addBackfill: false, cycleTime: false, discard: false,
   data: '', since: '', until: '', session: '', candidateCount: '', addedCount: '', category: '',
-  home: '', label: '', version: ''
+  home: '', label: '', version: '',
+  // The candidates hand-off file: where --out saves a list, and what --discard removes.
+  outGiven: false, out: '', discardPath: ''
 };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -159,6 +161,8 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--backfill-candidates') opts.backfillCandidates = true;
   else if (a === '--add-backfill') opts.addBackfill = true;
   else if (a === '--cycle-time') opts.cycleTime = true;
+  else if (a === '--discard') { opts.discard = true; opts.discardPath = argv[++i] || ''; }
+  else if (a === '--out') { opts.outGiven = true; opts.out = argv[++i] || ''; }
   else if (a === '--until') opts.until = argv[++i] || '';
   else if (a === '--category') opts.category = argv[++i] || '';
   else if (a === '--home') opts.home = argv[++i] || '';
@@ -173,14 +177,19 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial', 'evidence', 'recordFix',
-  'backfillCandidates', 'addBackfill', 'cycleTime']
+  'backfillCandidates', 'addBackfill', 'cycleTime', 'discard']
   .filter(function (m) { return opts[m]; });
 if (modes.length === 0) {
   die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial, --evidence, ' +
-    '--record-fix, --backfill-candidates, --add-backfill, --cycle-time');
+    '--record-fix, --backfill-candidates, --add-backfill, --cycle-time, --discard');
 }
 if (opts.until && !opts.cycleTime) die('--until goes with --cycle-time');
 if (modes.length > 1) die('modes are mutually exclusive, got: ' + modes.join(', '));
+// --out saves a candidate list, so it goes only with the two modes that make
+// one. Said before anything runs: a heartbeat written beside a refused option
+// would mark a scan done that never handed its list to anyone.
+if (opts.outGiven && !(opts.candidates || opts.backfillCandidates)) die('--out goes with --candidates or --backfill-candidates');
+if (opts.outGiven && !opts.out) die('--out needs the path of the file to save the list to');
 
 const cwd = process.cwd();
 
@@ -349,17 +358,106 @@ function appendJsonl(file, record) {
 function removeHandoff(file) {
   let real;
   try { real = fs.realpathSync(file); } catch (e) { return; } // already gone
-  const inTemp = [os.tmpdir(), '/tmp'].some(function (root) {
-    let base;
-    try { base = fs.realpathSync(root); } catch (e) { return false; }
-    const rel = path.relative(base, real);
-    return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
-  });
-  if (!inTemp) {
+  if (!inTempDir(real)) {
     console.error('correction-ledger.js: left ' + file + ' in place: it is outside the temp directory, so it is not this script\'s to delete');
     return;
   }
   try { fs.unlinkSync(file); } catch (e) { /* best effort */ }
+}
+
+// Whether `real` lies under `base`, both given as real paths. A folder is not
+// inside itself.
+function isInside(base, real) {
+  const rel = path.relative(base, real);
+  return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+}
+
+// Whether a real path lies inside the temp directory: os.tmpdir() or /tmp, each
+// compared as a real path, so a symlinked temp directory (macOS) compares equal
+// to itself. /tmp counts wherever the system temp folder points, because the
+// documented hand-off folders all come from `mktemp -d /tmp/...`.
+function inTempDir(real) {
+  return [os.tmpdir(), '/tmp'].some(function (root) {
+    let base;
+    try { base = fs.realpathSync(root); } catch (e) { return false; }
+    return isInside(base, real);
+  });
+}
+
+// --- the candidates hand-off file (--out, --discard) ---
+//
+// The candidate list holds near-verbatim text of what the user typed, and a
+// reader with a fresh context judges it. Until this file existed the only way to
+// hand the list over was through the session's own context: the script printed
+// it and the session retyped it into the reader's prompt, about 9 KB at a time,
+// and on 2026-11-18 one candidate gained a clause on the way. With --out the
+// script saves the list itself and prints only counts, the session passes the
+// reader a path, and --discard removes the file once the read is over.
+//
+// The file may live in exactly one kind of place. The same check serves saving
+// and removing, because this script runs under a permission approved in advance
+// and the caller chooses both paths:
+//   - its name is correction-candidates.json, so nothing else can be written or
+//     removed through these two options;
+//   - its folder is one of its own inside the temp directory, where a fresh
+//     `mktemp -d /tmp/...` folder always lands, so two sessions never share it
+//     (the temp directory itself does not count: every session shares that);
+//   - that folder is outside the project, its working copy and its main copy
+//     alike, even when the project itself sits under the temp directory: a
+//     landing or an upload carries a project's untracked files, and this text
+//     must not travel with them.
+// Returns { file }, the path to use, or { error } with one line saying which
+// rule refused it; `gone` is set too when the folder itself does not exist. The
+// reasons name no path: they are read by a model, and a folder's name is not
+// text this script vouches for.
+const HANDOFF_NAME = 'correction-candidates.json';
+function candidatesHandoff(given) {
+  const target = path.resolve(cwd, given);
+  if (path.basename(target) !== HANDOFF_NAME) return { error: 'the file must be named ' + HANDOFF_NAME };
+  let folder;
+  try { folder = fs.realpathSync(path.dirname(target)); }
+  catch (e) { return { gone: true, error: 'its folder does not exist; make one with mktemp -d first' }; }
+  if (!inTempDir(folder)) {
+    return { error: 'it is outside the temp directory: its folder must be one of its own inside the system temp folder or /tmp' };
+  }
+  const roots = [repoRoot, thisMainRoot()].filter(Boolean).map(realOr);
+  if (roots.some(function (root) { return folder === root || isInside(root, folder); })) {
+    return { error: 'it is inside the project, where a landing or an upload could carry it away' };
+  }
+  return { file: path.join(folder, HANDOFF_NAME) };
+}
+
+// With --out: the checked path a list will be saved to, or a refusal before
+// anything is scanned. Without it: null, and the list prints as it always has.
+function prepareOut() {
+  if (!opts.outGiven) return null;
+  const checked = candidatesHandoff(opts.out);
+  if (checked.error) die('--out refused: ' + checked.error + '. Nothing was scanned and nothing was saved.');
+  if (fs.existsSync(checked.file)) die('--out refused: a file already exists at that path; make a fresh folder and run again. Nothing was scanned and nothing was saved.');
+  return checked.file;
+}
+
+// Print a candidates result. With --out (`outFile` set), save all of it to the
+// hand-off file and print it without the list: the same fields, `candidateCount`
+// in the list's place, and `savedTo` when a file was written. An empty list
+// saves no file, so there is nothing to hand over and nothing to remove. The
+// write is create-only and owner-only: it never replaces a file, never follows
+// a link left at the path, and no other account on the machine can read it.
+function emitCandidates(result, outFile) {
+  const full = JSON.stringify(result, null, 2) + '\n';
+  if (outFile === null) { process.stdout.write(full); return; }
+  const summary = {};
+  Object.keys(result).forEach(function (k) { if (k !== 'candidates') summary[k] = result[k]; });
+  summary.candidateCount = result.candidates.length;
+  if (result.candidates.length > 0) {
+    try { fs.writeFileSync(outFile, full, { encoding: 'utf-8', flag: 'wx', mode: 0o600 }); }
+    catch (e) {
+      if (e && e.code === 'EEXIST') die('--out refused: a file already exists at that path; make a fresh folder and run again. Nothing was saved.');
+      die('--out could not save the list: ' + (e && e.message) + '. Nothing was saved.');
+    }
+    summary.savedTo = outFile;
+  }
+  process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
 }
 
 function truncate(value, max) {
@@ -426,6 +524,10 @@ function shareable(row) {
 // Finds human turns that MIGHT be interventions, so a model only has to read those
 // rather than the whole transcript. No judgment happens here; that is the point.
 // Structural data comes from a script, not an LLM.
+//
+// The list prints to stdout. With --out <file> it is saved to the candidates
+// hand-off file instead and only its counts print, so the text reaches the
+// reader without passing through the caller: see candidatesHandoff().
 // ==========================================================================
 
 // Claude Code stores transcripts under ~/.claude/projects/<encoded-cwd>/. The
@@ -686,6 +788,7 @@ function assistantText(entry) {
 }
 
 function runCandidates() {
+  const outFile = prepareOut(); // null without --out: the list is printed, as before
   const result = {
     repo: repoLabel, optedOut: optedOut(), everCaptured: false,
     // `scanned` separates "there was nothing to find" from "there was nothing to
@@ -704,13 +807,13 @@ function runCandidates() {
 
   if (result.optedOut) {
     // Report it rather than silently returning nothing, so a caller can say why.
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    emitCandidates(result, outFile);
     return;
   }
 
   const dir = transcriptDir();
   if (!dir) {
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    emitCandidates(result, outFile);
     console.error('correction-ledger.js: no transcript directory for this project; nothing to scan');
     return;
   }
@@ -739,7 +842,7 @@ function runCandidates() {
   result.candidates = scan.exchanges.filter(function (x) { return x.kept; }).map(candidateOf);
 
   result.candidates.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
-  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  emitCandidates(result, outFile);
 }
 
 // The one walk over a set of session files (review of #229, R15). Capture and the
@@ -1286,6 +1389,7 @@ function inThisRepoOrDie(mode) {
 
 function runBackfillCandidates() {
   const here = inThisRepoOrDie('--backfill-candidates');
+  const outFile = prepareOut(); // null without --out: the list is printed, as before
   const result = {
     repo: path.basename(here),
     counts: { repo_rows: 0, not_needed: 0, already_filled: 0, no_session: 0, transcript_gone: 0, no_match: 0, candidates: 0 },
@@ -1293,7 +1397,7 @@ function runBackfillCandidates() {
   };
   if (optedOut()) {
     result.optedOut = true;
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    emitCandidates(result, outFile);
     return;
   }
   const fills = fillsFor(here);
@@ -1314,7 +1418,33 @@ function runBackfillCandidates() {
       asked: ex.asked, assistant_said: ex.assistant_said, human_said: ex.human_said
     });
   });
-  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  emitCandidates(result, outFile);
+}
+
+// ==========================================================================
+// Mode: --discard <file>  (remove the candidates hand-off file)
+//
+// The reader is the file's only consumer, so the caller removes it as soon as
+// the read is over, whether or not rows come of it: every later step works from
+// the reader's short rows. Waiting for --heartbeat instead would leave the list
+// on disk for as long as the user takes to confirm those rows. Only a file
+// candidatesHandoff() accepts is removed. A file that is already gone is not an
+// error, so the call can be repeated; a path the check refuses exits 1 with the
+// reason and removes nothing.
+// ==========================================================================
+
+function runDiscard() {
+  if (!opts.discardPath) die('--discard needs the path of the candidates file to remove');
+  const none = function () { process.stdout.write(JSON.stringify({ discarded: false, reason: 'no such file' }) + '\n'); };
+  const checked = candidatesHandoff(opts.discardPath);
+  if (checked.gone) { none(); return; }
+  if (checked.error) die('--discard refused: ' + checked.error + '. Nothing was removed.');
+  try { fs.unlinkSync(checked.file); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') { none(); return; }
+    die('--discard could not remove the file: ' + (e && e.message));
+  }
+  process.stdout.write(JSON.stringify({ discarded: true }) + '\n');
 }
 
 function runAddBackfill() {
@@ -2266,3 +2396,4 @@ else if (opts.recordFix) runRecordFix();
 else if (opts.backfillCandidates) runBackfillCandidates();
 else if (opts.addBackfill) runAddBackfill();
 else if (opts.cycleTime) runCycleTime();
+else if (opts.discard) runDiscard();
