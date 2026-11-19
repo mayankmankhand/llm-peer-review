@@ -1886,15 +1886,19 @@ function openFindingsWithLabels(data) {
 // wrote counts as taken, the same as an id it used. Reading too much only
 // leaves a gap in the carried numbers; reading too little puts a finding under
 // a number that means something else.
-//   - Tags are dropped first, as proseWords() does, so an image's address or
-//     its embedded bytes are never read as text the page prints.
+//   - Tags are dropped first, so an image's address or its embedded bytes are
+//     never read as text the page prints. A tag opens only where a letter, a
+//     slash, an exclamation mark or a question mark follows the bracket, as it
+//     does in a browser: "5 < 10, see R7 > 3" is printed as written, and the
+//     wider pattern proseWords() counts with would drop that R7 with the signs
+//     (review of this change, R10).
 //   - A number is a capital R at the start of a word, one to four digits, then
 //     the end of the word: PR223, r40, R12a and R12345 are not finding numbers.
 function highestNamedId(value) {
   let max = 0;
   (function walk(v) {
     if (typeof v === 'string') {
-      const text = v.replace(/<[^>]*>/g, ' ');
+      const text = v.replace(/<[A-Za-z\/!?][^>]*>/g, ' ');
       const re = /\bR(\d{1,4})\b/g;
       let m;
       while ((m = re.exec(text)) !== null) {

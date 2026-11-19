@@ -1894,6 +1894,18 @@ function cycle162ReviewTests() {
   check('named numbers: text inside a tag and a long digit run do not count',
     afterNoise === 'R8', 'the carried finding is ' + afterNoise + '; R8 means only the plain R7 was read');
 
+  // A less-than sign in a sentence is not a tag. A browser prints
+  // "5 < 10, see R7 > 3" as it is written, so that R7 is a number the reader
+  // sees and a carried finding has to stay clear of it. A tag opens only where
+  // a letter, a slash, an exclamation mark or a question mark follows the
+  // bracket. The image beside it is a real tag, so a reader that stopped
+  // dropping tags altogether fails here too (review of this change, R10).
+  const afterPlainSign = carriedIdOf('named-plain-sign', {
+    bottomLine: ['It holds when 5 < 10, see R7 > 3 for the rest.'],
+    groups: ownGroup({ fields: [{ label: 'Screenshot', value: '<img src="shots/R99.png" alt="R98">' }] }) });
+  check('named numbers: a plain less-than sign does not hide a number',
+    afterPlainSign === 'R8', 'the carried finding is ' + afterPlainSign + '; R8 means the R7 between the two signs was read and the image tag was not');
+
   // --- R13: an exit line glued to output that ended without a newline ---
   const glued = path.join(rdir, 'glued.txt');
   fs.writeFileSync(glued, 'xexit 3\n', 'utf-8');
