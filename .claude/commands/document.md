@@ -95,9 +95,13 @@ makes that countable instead of remembered.
 
 ### Find the candidates
 
+Make a fresh folder with `mktemp -d /tmp/correction-candidates.XXXXXX`, per "Temporary folders" in `.claude/skills/shared/html-outputs.md` (inlined at the end of this file), then run the scan with that folder's path typed as literal words:
+
 ```bash
-node .claude/scripts/correction-ledger.js --candidates
+node .claude/scripts/correction-ledger.js --candidates --out <folder>/correction-candidates.json
 ```
+
+The script saves the candidates to that file, for the reader alone, and prints the scan without them, so their text stays out of this conversation: `candidateCount` in place of the list, and `savedTo`, the file's path, when it saved one (an empty list saves none).
 
 A deterministic pre-filter, no model involved. It reads this project's session
 transcripts, excludes subagent transcripts, and windows to everything since this repo
@@ -114,13 +118,13 @@ would permanently certify a scan that never ran, and `/error-analysis` would lat
 the user capture had run and found nothing. Say one line: capture could not find this
 project's transcripts, so nothing was scanned.
 
-**If `interruptsWithoutFollowUp` is above 0, say one line**, whatever `candidates` holds:
+**If `interruptsWithoutFollowUp` is above 0, say one line**, whatever `candidateCount` is:
 that many interrupts in this window had no follow-up message the scan could find, so a
 correction you made then may be missing from the log of your corrections. The scan pairs an interrupt with the
 next message typed within ten minutes of it, in the same session or the next one, and
 counts it here when a slash command came first.
 
-**If `scanned` is true and `candidates` is empty, skip to "Record the heartbeat" and say
+**If `scanned` is true and `candidateCount` is 0, skip to "Record the heartbeat" and say
 nothing else to the user.** The stage is silent when there was genuinely nothing to capture.
 
 ### Explain it, the first time only
@@ -142,12 +146,17 @@ primary way the feature introduces itself. Say it once, then never again in this
 Dispatch the `correction-extractor` agent (`subagent_type=correction-extractor`; when the type is not
 found, run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload), then the fallback in
 `.claude/skills/shared/model-routing.md`) with
-the candidate list. It has no memory of this session, which is the point: a participant
+the candidates file. It has no memory of this session, which is the point: a participant
 has a stake in reading a correction as a clarification, the same reason the M2 audit never
 lets anything judge its own output.
 
-Pass it the candidates JSON and nothing else. Do not summarize the session for it, and do
-not tell it what you think happened.
+Its whole prompt is one line, with the `savedTo` path typed in: `Your candidates JSON is the file <savedTo>. Read it in full with the Read tool; it is your whole input.` Never paste or retype the candidates: a retyped list can gain words the human never typed. If it cannot read the file, that is a failed read, handled under "Record the heartbeat", never a reason to paste. Do not summarize the session for it, and do not tell it what you think happened.
+
+Once the read is over (its JSON came back, or it failed for good), remove the file:
+
+```bash
+node .claude/scripts/correction-ledger.js --discard <savedTo>
+```
 
 ### Confirm every open code with the user
 

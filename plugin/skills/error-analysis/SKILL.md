@@ -140,7 +140,7 @@ Capture is forward-only by design: the first run in a repo scans only the newest
 Rules for a backfill:
 
 - **Only when the user asks, and only for the repo they name.** Never sweep every project on the machine. Other projects' transcripts are private conversations; the per-repo opt-out marker (`.claude/.no-correction-log`) is honored at scan time exactly as it is for forward capture.
-- **Same gate as forward capture.** Candidates go through the same `correction-extractor` read and the same human-written open code; nothing is recorded that the user did not confirm. Expect the open codes to be rougher than live ones, because the context has faded.
+- **Same gate as forward capture.** Candidates go through the same `correction-extractor` read and the same human-written open code; nothing is recorded that the user did not confirm. Hand the reader a file, never the pasted list: run the scan again with `--out`, as steps 1 and 2 of the fill-in section below do from their `mktemp` call on. Expect the open codes to be rougher than live ones, because the context has faded.
 - **Say what it is worth before running it.** Run `--candidates --since <date>` first and report the candidate count per day. A backfill is worth it only when that count would move the first rankable ranking forward by weeks; if it is small, say so and let the user decide.
 - **Mark the rows.** Start each open code from a backfill pass with `backfill:` so a later ranking can separate the two populations.
 
@@ -149,20 +149,20 @@ Rules for a backfill:
 node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --candidates --since 2026-08-01T00:00:00Z
 ```
 
-`--candidates` never writes: it only reads transcripts and the heartbeat file. The ledger is written by `--add`, the heartbeat by `--heartbeat`, and `--rollup` and `--set-axial` write their own files under `~/.claude/`. A candidate count is free to look at and safe to discard.
+`--candidates` never writes to the ledger: it only reads transcripts and the heartbeat file, and with `--out` it saves its list to the temp file you name. The ledger is written by `--add`, the heartbeat by `--heartbeat`, and `--rollup` and `--set-axial` write their own files under `~/.claude/`. A candidate count is free to look at and safe to discard.
 
 ### Filling in the request and rewrite on older rows
 
 Rows recorded before the request and rewrite fields existed can have them filled in from transcripts still on disk (Claude Code deletes transcripts after a retention period, 30 days by default). This never adds a row: a duplicated row cannot be told apart from a real recurrence, so the filled-in fields go to a private side file, `~/.claude/correction-backfill.jsonl`, keyed by each row's `at` and `session`, and the evidence step joins them back on. Same rules as a backfill of rows: only when the user asks, only for the repo they name, from a session opened in that repo.
 
-1. List what can be filled in. This writes nothing:
+1. List what can be filled in. This writes nothing to the ledger. Make a fresh folder with `mktemp -d /tmp/correction-candidates.XXXXXX`, per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`, then:
 
    ```bash
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --backfill-candidates
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --backfill-candidates --out <folder>/correction-candidates.json
    ```
 
-   It prints this repo's rows that lack the two fields and still have a transcript, each with the exchange around it, plus counts of the rows it could not use (no session recorded, transcript gone, no message at that exact time).
-2. Dispatch the `correction-extractor` agent with that output, exactly as capture does. It returns the filled-in fields in its `backfill` array.
+   It saves this repo's rows that lack the two fields and still have a transcript, each with the exchange around it, to that file, and prints only its counts: the rows it saved, the rows it could not use (no session recorded, transcript gone, no message at that exact time), and `savedTo`, the file's path. Their text stays out of this conversation.
+2. Dispatch the `correction-extractor` agent with a one-line prompt, the `savedTo` path typed in: `Your candidates JSON is the file <savedTo>. Read it in full with the Read tool; it is your whole input.` Never paste or retype the list; if it cannot read the file, stop and say so. It returns the filled-in fields in its `backfill` array. Once the read is over, remove the file with `node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --discard <savedTo>`.
 3. Show each one to the user. Nothing is written until they accept it, and they can drop either field.
 4. Write the accepted entries as `correction-backfill-rows.json` in a fresh folder from `mktemp -d /tmp/correction-backfill.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`, then run:
 
