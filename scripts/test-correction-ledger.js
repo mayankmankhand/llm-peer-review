@@ -2312,12 +2312,13 @@ function cycleTimeTest() {
     re.status === 0 && !!re.json && re.json.ms.tests === 10000 && sum(re.json.ms) === 1000000, one(re.stdout + re.stderr));
 
   // --- H: a result stamped before its call -----------------------------------
-  // Claude Code sometimes stamps a result a split second before the call that
-  // started it, though it writes the result's line after the call's line, as
-  // the two helper calls below have it. Read in time order, the result comes
-  // first. It must still be matched with its call: dropped, it leaves the call
-  // unanswered, and the helper is then counted from its call to the session's
-  // last entry (2,140 s of helper time here, and two foreground helpers).
+  // When the machine's clock is set back between a call and its result, the
+  // result is stamped a split second before the call that started it, though
+  // its line is written after the call's line, as the two helper calls below
+  // have it. Read in time order, the result comes first. It must still be
+  // matched with its call: dropped, it leaves the call unanswered, and the
+  // helper is then counted from its call to the session's last entry (2,140 s
+  // of helper time here, and two foreground helpers).
   //   h1's result says the helper went to the background: counted, no time.
   //   h2's result carries no such flag: a foreground helper whose result came
   //   back at once, so it is counted and adds no time either.
