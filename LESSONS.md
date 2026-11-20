@@ -597,3 +597,9 @@
 ## The three-gaps cycle (page numbers, the page read, the corrections hand-off)
 
 - **A borrowed pattern brings its misses along: test it on the input the new use cannot afford to lose.**
+
+## The time report fix (a result stamped before its call)
+
+- **Time stamps are not arrival order: pair a call with its result by id, whichever is read first.**
+- **Anchor the number in a count check: `0 files changed` also matches `10 files changed`.**
+- **Model a page's data on the last data file, not the rendered page: the renderer adds text of its own.**
