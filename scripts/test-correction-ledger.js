@@ -2310,6 +2310,63 @@ function cycleTimeTest() {
   const re = cycle(e, ['--until', at(1000)]);
   check('248 cycle-time: a call with no result, or a background run with no notice, stops at its session\'s last entry',
     re.status === 0 && !!re.json && re.json.ms.tests === 10000 && sum(re.json.ms) === 1000000, one(re.stdout + re.stderr));
+
+  // --- H: a result stamped before its call -----------------------------------
+  // Claude Code sometimes stamps a result a split second before the call that
+  // started it, though it writes the result's line after the call's line, as
+  // the two helper calls below have it. Read in time order, the result comes
+  // first. It must still be matched with its call: dropped, it leaves the call
+  // unanswered, and the helper is then counted from its call to the session's
+  // last entry (2,140 s of helper time here, and two foreground helpers).
+  //   h1's result says the helper went to the background: counted, no time.
+  //   h2's result carries no such flag: a foreground helper whose result came
+  //   back at once, so it is counted and adds no time either.
+  //   claude 0-30, 330-350, 2150-2160, 2160-2170 = 70; waiting 30-330 = 300;
+  //   away 350-2150 = 1,800; tests 0; agents 0                total 2,170 s
+  const h = makeSandbox('cycle-h');
+  writeLog(h, h.proj, 'sess-h', [
+    command(0, '/explore'),
+    say(10, 'Sending two helpers.'),
+    tool(20, 'h1', 'Agent', { description: 'first', prompt: 'p' }),
+    result(19.5, 'h1', { agentId: 'y1', isAsync: true }),
+    tool(24, 'h2', 'Agent', { description: 'second', prompt: 'p' }),
+    result(23.8, 'h2', { agentId: 'y2' }),
+    say(30, 'Both are out.'),
+    human(330, 'Fine, carry on with it.'),
+    say(340, 'Carrying on.'),
+    say(350, 'Done.'),
+    human(2150, 'Back again, what is next?'),
+    say(2160, 'The next step.'),
+  ]);
+  const rh = cycle(h, ['--until', at(2170)]);
+  const jh = rh.json || {};
+  check('cycle-time: a result stamped before its call adds no helper time',
+    rh.status === 0 && !!jh.ms && jh.ms.agents === 0 && jh.ms.claude === 70000 && jh.ms.waiting === 300000 && jh.ms.away === 1800000 && sum(jh.ms) === 2170000,
+    one(rh.stdout + rh.stderr));
+  check('cycle-time: a call whose result is stamped first keeps the flags of that result',
+    !!jh.counts && jh.counts.backgroundAgents === 1 && jh.counts.agents === 1, one(JSON.stringify(jh.counts)));
+
+  // --- I: a background test run whose launch result is stamped first ----------
+  // A guard on case H's neighbour. This run already ends at its finish notice,
+  // because its background flag is read from the call and its end from the
+  // notice, never from the result's time, and it must keep doing so: a fix that
+  // ended every such call at its own start would read 0 s of tests here.
+  //   tests 10-100 = 90; claude 0-10, 100-110, 110-120 = 30    total 120 s
+  const bg = makeSandbox('cycle-i');
+  writeLog(bg, bg.proj, 'sess-i', [
+    command(0, '/explore'),
+    say(5, 'Running the suite in the background.'),
+    tool(10, 'g1', 'Bash', { command: 'npm test', run_in_background: true }),
+    result(9.6, 'g1', { backgroundTaskId: 'bg-g1' }),
+    say(20, 'Started.'),
+    notice(100, 'g1'),
+    say(110, 'The suite passed.'),
+  ]);
+  const ri = cycle(bg, ['--until', at(120)]);
+  const ji = ri.json || {};
+  check('cycle-time: a background test run whose launch result is stamped first still ends at its finish notice',
+    ri.status === 0 && !!ji.ms && ji.ms.tests === 90000 && ji.ms.claude === 30000 && !!ji.counts && ji.counts.testRuns === 1 && sum(ji.ms) === 120000,
+    one(ri.stdout + ri.stderr));
 }
 
 function tripwireTest() {

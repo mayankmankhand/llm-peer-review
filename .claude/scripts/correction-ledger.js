@@ -2002,6 +2002,12 @@ function runSetAxial() {
 // backgroundAgents, quiet (stretches of over 150 s inside a turn with no text
 // from Claude) and sessions.
 //
+// A call is matched with its result by id, whatever order their time stamps
+// sort in. Claude Code sometimes stamps a result a split second before the
+// call it answers. Such a call ends where it starts and takes that result's
+// own flags, so a helper sent to the background is still a background one. A
+// call counts as never answered only when no result for it is read at all.
+//
 // PRIVACY. It reads timestamps, entry types, tool names and durations. A Bash
 // command is read only to test whether it runs tests, and is never printed;
 // nothing is stored. The opt-out marker holds as in every other mode: an
@@ -2168,7 +2174,8 @@ function cycleWindow(markers, since) {
 }
 
 // One session cut into intervals on the shared timeline, and its counts added
-// to `counts`. Tool calls are paired with their results by id.
+// to `counts`. Tool calls are paired with their results by id, whichever of
+// the two is read first.
 function sessionIntervals(entries, start, end, notices, counts) {
   const iv = [];
   const inWindow = function (t) { return t >= start && t <= end; };
@@ -2179,6 +2186,16 @@ function sessionIntervals(entries, start, end, notices, counts) {
   let lastSeen = start;
   entries.forEach(function (x) { if (x.t <= end && x.t > lastSeen) lastSeen = x.t; });
   const pending = new Map();
+  // The entries are in time order, and Claude Code sometimes stamps a result a
+  // split second before the call it answers (in the file, the result's line
+  // still follows the call's). Such a result is read first and finds no call
+  // waiting. It is kept here under its call's id, as the result object any
+  // other result hands to `finish`, and handed over when the call is read.
+  // Dropped, it left the call looking unanswered, and a helper sent to the
+  // background was counted as a foreground one running to the session's last
+  // entry. A kept result whose call is never read changes nothing: it is let
+  // go with this map when the walk ends.
+  const early = new Map();
   let turnStart = null, lastClaude = null, lastVisible = null;
   const turnEnd = function () { return lastClaude !== null ? lastClaude : turnStart; };
   const quietUntil = function (t) {
@@ -2221,15 +2238,22 @@ function sessionIntervals(entries, start, end, notices, counts) {
         lastVisible = x.t;
       }
       blocksOf(x.e, 'tool_use').forEach(function (c) {
-        if (c.id) pending.set(c.id, { id: c.id, t: x.t, name: c.name, input: c.input && typeof c.input === 'object' ? c.input : {} });
+        if (c.id) {
+          const call = { id: c.id, t: x.t, name: c.name, input: c.input && typeof c.input === 'object' ? c.input : {} };
+          // Its result was read first: the call ends at its own start, since
+          // the log shows the result was back by then, and no time is invented.
+          if (early.has(c.id)) { finish(call, x.t, early.get(c.id)); early.delete(c.id); }
+          else pending.set(c.id, call);
+        }
         if (c.name === ASK_TOOL) { quietUntil(x.t); lastVisible = x.t; }   // the question is on screen
       });
     } else {
       blocksOf(x.e, 'tool_result').forEach(function (c) {
+        const res = x.e.toolUseResult && typeof x.e.toolUseResult === 'object' ? x.e.toolUseResult : {};
         const call = pending.get(c.tool_use_id);
-        if (!call) return;
+        if (!call) { if (c.tool_use_id) early.set(c.tool_use_id, res); return; }   // read before its call: kept for it
         pending.delete(c.tool_use_id);
-        finish(call, x.t, x.e.toolUseResult && typeof x.e.toolUseResult === 'object' ? x.e.toolUseResult : {});
+        finish(call, x.t, res);
         if (call.name === ASK_TOOL) lastVisible = x.t;                     // answered: the quiet clock restarts
       });
     }
