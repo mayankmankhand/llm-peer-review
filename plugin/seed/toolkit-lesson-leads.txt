@@ -19,6 +19,7 @@ A ban written as "X stays in the receipt" needs its scope in the same sentence.
 A ban written as "X stays in the receipt" needs its scope in the same sentence: unscoped, the rule's 14 copies read as forbidding file names in a plan, which the plan critic requires.
 A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.
 A batch approval covers the edits it listed; a later correction to the same prompt text asks again.
+A borrowed pattern brings its misses along: test it on the input the new use cannot afford to lose.
 A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.
 A build that scopes names and permissions for one distribution leaves the other behind unless the same sweep runs over its files.
 A cap on each part is not a cap on the whole: measure the total against the budget.
@@ -62,6 +63,7 @@ A guard that judges one text and runs another is a bypass by construction: execu
 A guard that reads a file its own step creates has no before state: aim it at a file that exists, or make it a target.
 A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.
 A headless session inherits the user's extra working folders, so acceptEdits there can edit the repo: start it with `--setting-sources project,local` and prove the fence with a probe that tries the forbidden write.
+A helper run inside the project signs made-up messages with the owner's name: keep its output out of tracked files.
 A judge validated on the fallback agent is not validated as shipped: the fallback's extra tools let it compare bytes instead of looking.
 A judge with no edit tools still tries scratch experiments, and Claude Code's denial invalidates the whole harness run.
 A leading wildcard in a permission row widens what the row trusts, not just where the file lives; measure the hostile form before shipping the row.
@@ -83,6 +85,8 @@ A new rule written for the orchestrator stops one step short of its neighbors: s
 A new temporary worktree in a prompt needs the same copy-and-install line as every other: a fresh checkout has no packages and no local settings.
 A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.
 A parity test that reads its expected values from the code it checks only proves the two sides agree: pin the expected literals in the test, or one bad edit moves the code and the test together.
+A pass mark is one only if the change it guards can move it; anything else is a rule for which runs count.
+A pass mark met with one miss still has a miss: read what caused it before closing the step.
 A passing happy-path test is not enough - test edge cases, or let adversarial review hunt.
 A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`.
 A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`: it is the copy-install seed.
@@ -114,6 +118,7 @@ A rewrite to a link that moves only at session start breaks an update taken mid-
 A rule that keeps something out of a comparison applies to both sides: test the before side as hard as the after side.
 A rule widened to catch one missed case can mis-sort another: before keeping it, test the case on its other side.
 A rule written for the orchestrator must reach every runner that applies it: list them and check each one.
+A rule written from one case keeps that case's detail: reread it for a noun only that case had.
 A runner mode several callers share changes only behind a flag the new caller passes.
 A safety baseline must check what the test can change, not the bytes of files the owner's own sessions also write.
 A score that wobbles a point on unchanged input cannot drive a loop; the gaps it returns can.
@@ -179,6 +184,7 @@ An exclusion applied to one arm of a comparison must apply to the other arm too.
 An exclusion list of bare words also drops true matches that use them; exclude the nearby problem's own phrases.
 An inherited CSS property belongs on the shared root, not copied into each file.
 An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.
+Anchor the number in a count check: `0 files changed` also matches `10 files changed`.
 Ask a consequential choice in plain text the owner answers in words, never as clickable options.
 Ask a consequential choice in plain text, not as clickable options: an answer can arrive as the first option without the owner choosing it.
 Ask what a change means for repos that already installed the last version, before writing the plan.
@@ -269,6 +275,7 @@ Hold a cheaper model to a known-answer case taken from a real miss; an easy fixt
 Hybrid approach beats all-or-nothing.
 In `git status --porcelain -z`, a rename's old name follows when either column says R, so check both.
 In `git status --porcelain -z`, the old name of a rename follows whichever column says R: an intent-to-add file renamed in the working tree shows ` R`, and checking only the first column garbles the next path.
+In a Claude Code shell `grep` is ugrep: a bound like `.{0,200}` fails as too complex; use `command grep` or a small bound.
 In a numbered step, put an explanation after the step's last action, never between two actions.
 In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.
 In an unattended run, one denied call can make the model skip a later, different call without trying it; tell test sessions to judge each call on its own.
@@ -304,6 +311,7 @@ Masking the match that triggered the report is not masking the line.
 Measure a hand-off before delegating a single command to a cheaper model: the round trip, not accuracy, decides.
 Measure a new inline command form in a real default-mode session before building on it; a shell exit code says nothing about the harness.
 Measure how each reader is cut before choosing how a file gets read: the Read tool returned the 35 KB lessons index whole where a Bash `cat` is cut to a 2 KB preview, and `sed` line ranges would have asked for permission every cycle.
+Model a page's data on the last data file, not the rendered page: the renderer adds text of its own.
 Moving scratch work to one fixed folder needs a look-there-first rule, or a retry copies restored files over it.
 Moving text verbatim between files keeps its links but breaks its prose pointers: sweep for "above", "below" and quoted heading names before calling the move done.
 Mutation-testing a group of assertions is not mutation-testing each assertion.
@@ -404,6 +412,7 @@ The seeded rules file reaches plugin projects through C-7, not the seed history:
 The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.
 The self-modification guard blocks adding a permission to `settings.local.json`; ask the user to add it.
 The test gate shows a suite's lines only when it fails; guard an old case by its absence from the failure list.
+Time stamps are not arrival order: pair a call with its result by id, whichever is read first.
 To call a script's private functions without editing it, compile its source at its own path with one export line added.
 To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.
 To find who approved a tool call, read the `source` of its `permissionDecision` in the session log.
@@ -434,6 +443,7 @@ When a hand-kept list decides what runs, check the list against what exists.
 When a hand-kept list decides what runs, check the list against what exists: a missing entry otherwise passes as all green.
 When a model types JSON in the one-argument form, it must hold no apostrophe, not even as an escape.
 When a prompt adds a temporary worktree, give it the copy-and-install line its other worktrees get.
+When a prompt file gains a rule, reread its examples against it: a model copies the example before the rule.
 When a prompt has one stage read a field from another stage's output, check the producer's template has it.
 When a prompt spells out a placeholder's value, grep each later use of it and spell those out too.
 When a prompt spells out a placeholder's value, grep every later use of that placeholder or the model improvises the rest.
@@ -465,6 +475,7 @@ When the owner changes a decision at a page, sweep what was already written unde
 When the plan's wording drifts from the exploration summary the owner approved, the summary wins.
 When two reads of a page disagree, check each against the page itself, not against the other read.
 When two reads of the same files finish in one session, offer one merged plan before drafting anything to file.
+When two times are in the wrong order, check the machine's clock before reading code.
 When you keep records instead of replacing them, also keep everything those records point at.
 Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.
 Worktree detection: `--git-dir` vs `--git-common-dir`.
