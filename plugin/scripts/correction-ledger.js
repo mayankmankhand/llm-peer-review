@@ -2004,9 +2004,12 @@ function runSetAxial() {
 //
 // A call is matched with its result by id, whatever order their time stamps
 // sort in. Claude Code sometimes stamps a result a split second before the
-// call it answers. Such a call ends where it starts and takes that result's
-// own flags, so a helper sent to the background is still a background one. A
-// call counts as never answered only when no result for it is read at all.
+// call it answers. Such a call is closed as soon as it is read, with that
+// result's own flags and the call's own start as the time the result came: a
+// helper sent to the background is still a background one, and a foreground
+// call adds no time. One kind of call does not end at that time: a test run
+// started in the background still runs to its finish notice. A call counts as
+// never answered only when no result for it is read at all.
 //
 // PRIVACY. It reads timestamps, entry types, tool names and durations. A Bash
 // command is read only to test whether it runs tests, and is never printed;
@@ -2240,8 +2243,11 @@ function sessionIntervals(entries, start, end, notices, counts) {
       blocksOf(x.e, 'tool_use').forEach(function (c) {
         if (c.id) {
           const call = { id: c.id, t: x.t, name: c.name, input: c.input && typeof c.input === 'object' ? c.input : {} };
-          // Its result was read first: the call ends at its own start, since
-          // the log shows the result was back by then, and no time is invented.
+          // Its result was read first, so the call is closed now, with its own
+          // start as the time the result came: the log shows the result was
+          // back by then, and no time is invented. What that time ends is for
+          // `finish` to say: a test run started in the background still runs
+          // to its finish notice.
           if (early.has(c.id)) { finish(call, x.t, early.get(c.id)); early.delete(c.id); }
           else pending.set(c.id, call);
         }

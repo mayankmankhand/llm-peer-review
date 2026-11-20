@@ -2324,7 +2324,7 @@ function cycleTimeTest() {
   //   claude 0-30, 330-350, 2150-2160, 2160-2170 = 70; waiting 30-330 = 300;
   //   away 350-2150 = 1,800; tests 0; agents 0                total 2,170 s
   const h = makeSandbox('cycle-h');
-  writeLog(h, h.proj, 'sess-h', [
+  const logH = [
     command(0, '/explore'),
     say(10, 'Sending two helpers.'),
     tool(20, 'h1', 'Agent', { description: 'first', prompt: 'p' }),
@@ -2337,7 +2337,8 @@ function cycleTimeTest() {
     say(350, 'Done.'),
     human(2150, 'Back again, what is next?'),
     say(2160, 'The next step.'),
-  ]);
+  ];
+  writeLog(h, h.proj, 'sess-h', logH);
   const rh = cycle(h, ['--until', at(2170)]);
   const jh = rh.json || {};
   check('cycle-time: a result stamped before its call adds no helper time',
@@ -2345,6 +2346,22 @@ function cycleTimeTest() {
     one(rh.stdout + rh.stderr));
   check('cycle-time: a call whose result is stamped first keeps the flags of that result',
     !!jh.counts && jh.counts.backgroundAgents === 1 && jh.counts.agents === 1, one(JSON.stringify(jh.counts)));
+  // The same log with two more early results, which must change nothing. One
+  // answers a tool the report does not time (a file read): it is kept and
+  // matched like any other, and nothing is counted for it. The other has no
+  // call anywhere in the log: it is kept, never matched, and let go when the
+  // walk ends. The report must read exactly as it does without them.
+  const hx = makeSandbox('cycle-hx');
+  writeLog(hx, hx.proj, 'sess-hx', logH.slice(0, 6).concat([
+    tool(26, 'x1', 'Read', { file_path: '/x/notes.md' }),
+    result(25.7, 'x1'),
+    result(28, 'x2'),
+  ], logH.slice(6)));
+  const rx = cycle(hx, ['--until', at(2170)]);
+  const jx = rx.json || {};
+  check('cycle-time: an early result of an untimed tool, or one with no call at all, changes nothing',
+    rx.status === 0 && !!jx.ms && !!jh.ms && JSON.stringify(jx.ms) === JSON.stringify(jh.ms) && JSON.stringify(jx.counts) === JSON.stringify(jh.counts),
+    one(rx.stdout + rx.stderr));
 
   // --- I: a background test run whose launch result is stamped first ----------
   // A guard on case H's neighbour. This run already ends at its finish notice,
