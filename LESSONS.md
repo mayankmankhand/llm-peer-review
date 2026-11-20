@@ -603,3 +603,4 @@
 - **Time stamps are not arrival order: pair a call with its result by id, whichever is read first.**
 - **Anchor the number in a count check: `0 files changed` also matches `10 files changed`.**
 - **Model a page's data on the last data file, not the rendered page: the renderer adds text of its own.**
+- **When two times are in the wrong order, check the machine's clock before reading code.**
